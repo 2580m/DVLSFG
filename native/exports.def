@@ -1,0 +1,9 @@
+LIBRARY "DVLSFG.Native.dll"
+EXPORTS
+    layer_vkGetInstanceProcAddr
+    layer_vkGetDeviceProcAddr
+    DVLSFG_GetStatus
+    DVLSFG_SetEnabled
+    DVLSFG_Probe
+    DVLSFG_RequestCapture
+    DVLSFG_GetMetrics

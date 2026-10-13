@@ -1,0 +1,279 @@
+#include "platform.hpp"
+#include "context.hpp"
+#include "config/config.hpp"
+#include "extract/extract.hpp"
+#include "extract/trans.hpp"
+#include "utils/utils.hpp"
+#include "layer.hpp"
+#include "common/exception.hpp"
+#include "readback.hpp"
+#include <lsfg_3_1.hpp>
+#include <lsfg_3_1p.hpp>
+#include <array>
+#include <vector>
+#include <chrono>
+#include <thread>
+
+namespace {
+void barrier(VkCommandBuffer buf, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
+    unsigned srcFamily, unsigned dstFamily, VkAccessFlags srcAccess, VkAccessFlags dstAccess) {
+    VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    b.srcAccessMask=srcAccess; b.dstAccessMask=dstAccess;
+    b.oldLayout=oldLayout; b.newLayout=newLayout;
+    b.srcQueueFamilyIndex=srcFamily; b.dstQueueFamilyIndex=dstFamily;
+    b.image=image; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    Layer::ovkCmdPipelineBarrier(buf,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0,0,nullptr,0,nullptr,1,&b);
+}
+void blit(VkCommandBuffer buf, VkImage src, VkImage dst, VkExtent2D extent) {
+    VkImageBlit region{};
+    region.srcSubresource=region.dstSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
+    region.srcOffsets[1]=region.dstOffsets[1]={int(extent.width),int(extent.height),1};
+    Layer::ovkCmdBlitImage(buf,src,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,dst,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,&region,VK_FILTER_NEAREST);
+}
+void waitIdle(VkDevice device) {
+    auto fn=reinterpret_cast<PFN_vkDeviceWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkDeviceWaitIdle"));
+    VkResult res=fn(device); if(res!=VK_SUCCESS) throw LSFG::vulkan_error(res,"Game device wait failed");
+}
+void completeRejectedPresentFence(VkDevice device,VkQueue queue,const void* metadata) {
+    // Some WSI paths reject a second present on an already-outdated chain
+    // without completing its fence. DXVK expects normal swapchain errors to
+    // complete queue operations. After idle, finish an unsignaled rejected fence.
+    auto get=reinterpret_cast<PFN_vkGetFenceStatus>(Layer::ovkGetDeviceProcAddr(device,"vkGetFenceStatus"));
+    auto submit=reinterpret_cast<PFN_vkQueueSubmit>(Layer::ovkGetDeviceProcAddr(device,"vkQueueSubmit"));
+    auto reset=reinterpret_cast<PFN_vkResetFences>(Layer::ovkGetDeviceProcAddr(device,"vkResetFences"));
+    for(auto* node=static_cast<const VkBaseInStructure*>(metadata);node;node=node->pNext) {
+        if(node->sType!=VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT) continue;
+        auto* fences=reinterpret_cast<const VkSwapchainPresentFenceInfoEXT*>(node);
+        if(fences->swapchainCount!=1 || !fences->pFences || !fences->pFences[0]) continue;
+        auto fence=fences->pFences[0];
+        if(get(device,fence)==VK_NOT_READY) {
+            auto resetResult=reset(device,1,&fence);
+            if(resetResult!=VK_SUCCESS) throw LSFG::vulkan_error(resetResult,"Rejected-present fence reset failed");
+            VkSubmitInfo complete{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            auto result=submit(queue,1,&complete,fence);
+            if(result!=VK_SUCCESS) throw LSFG::vulkan_error(result,"Rejected-present fence completion failed");
+            waitIdle(device);
+            DVLSFG::status("Completed application fence after rejected resize present");
+        }
+    }
+}
+void waitUntil(std::chrono::steady_clock::time_point deadline) {
+    struct Timer {
+        HANDLE handle=CreateWaitableTimerExW(nullptr,nullptr,0x2,TIMER_ALL_ACCESS);
+        ~Timer() { if(handle) CloseHandle(handle); }
+    };
+    thread_local Timer timer;
+    auto remaining=deadline-std::chrono::steady_clock::now();
+    if(remaining<=std::chrono::steady_clock::duration::zero()) return;
+    LARGE_INTEGER due{};
+    due.QuadPart=-std::max<long long>(1,std::chrono::duration_cast<std::chrono::nanoseconds>(remaining).count()/100);
+    if(timer.handle && SetWaitableTimer(timer.handle,&due,0,nullptr,nullptr,FALSE)) WaitForSingleObject(timer.handle,INFINITE);
+    else std::this_thread::sleep_until(deadline);
+}
+}
+LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent2D size,const std::vector<VkImage>& images,VkFormat sourceFormat)
+    : swapchain(chain),swapchainImages(images),extent(size),storedDevice(info.device),swapchainFormat(sourceFormat) {
+    const auto& conf=Config::activeConf;
+    if(size.width<128 || size.height<128 || size.width*conf.flowScale<64 || size.height*conf.flowScale<64)
+        throw std::runtime_error("Swapchain or flow resolution too small for LSFG pyramid");
+    const VkFormat format=VK_FORMAT_R16G16B16A16_SFLOAT;
+    std::array<HANDLE,2> inputs{};
+    frame_0=Mini::Image(info.device,info.physicalDevice,size,format,VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&inputs[0]);
+    frame_1=Mini::Image(info.device,info.physicalDevice,size,format,VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&inputs[1]);
+    std::vector<HANDLE> outputs(conf.multiplier-1);
+    for(size_t i=0;i<outputs.size();++i) out_n.emplace_back(info.device,info.physicalDevice,size,format,VK_IMAGE_USAGE_TRANSFER_SRC_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&outputs[i]);
+    auto init=conf.performance ? LSFG_3_1P::initialize : LSFG_3_1::initialize;
+    auto create=conf.performance ? LSFG_3_1P::createContext : LSFG_3_1::createContext;
+    auto destroy=conf.performance ? LSFG_3_1P::deleteContext : LSFG_3_1::deleteContext;
+    {
+        DVLSFG::BackendScope scope;
+        init(Utils::getDeviceUUID(info.physicalDevice),false,1.f/conf.flowScale,conf.multiplier-1,
+            [](const std::string& name) { return Extract::translateShader(Extract::getShader(name)); });
+        lsfgCtxId=std::shared_ptr<int32_t>(new int32_t(create(inputs[0],inputs[1],outputs,size,format)),
+            [destroy](int32_t* id) { try { destroy(*id); } catch(...) {} delete id; });
+    }
+    cmdPool=Mini::CommandPool(info.device,info.queue.first);
+    DVLSFG::status("Swapchain ready: " + std::to_string(size.width) + "x" + std::to_string(size.height));
+}
+LsContext::~LsContext() noexcept {
+    try {
+        if(!lsfgCtxId) return;
+        DVLSFG::status("Destroy context: waiting for game device");
+        if(storedDevice) waitIdle(storedDevice);
+        DVLSFG::status("Destroy context: releasing backend");
+        lsfgCtxId.reset();
+        DVLSFG::status("Destroy context: backend released");
+    } catch(...) {}
+}
+VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQueue queue,const std::vector<VkSemaphore>& waits,uint32_t index) {
+    auto started=std::chrono::steady_clock::now();
+    const auto& conf=Config::activeConf;
+    const auto family=info.queue.first;
+    auto epoch=DVLSFG::epoch();
+    bool seedBoth=frameIdx==0 || lastEpoch!=epoch;
+    int sourceLimit=DVLSFG::inputFrameLimit();
+    if(seedBoth || sourceLimit!=previousLimit) { previousInput={}; previousOutput={}; inputPeriodSeconds=0; previousPacingSeconds=0; }
+    previousLimit=sourceLimit;
+    if(previousInput.time_since_epoch().count()) {
+        // Exclude our own pacing waits: feeding them back as input cost would
+        // progressively reduce an uncapped game's frame rate on every frame.
+        auto sample=std::chrono::duration<double>(started-previousInput).count()-previousPacingSeconds;
+        if(sample>0 && sample<0.1)
+            inputPeriodSeconds=inputPeriodSeconds>0 ? inputPeriodSeconds*0.75+sample*0.25 : sample;
+    }
+    previousInput=started;
+    previousPacingSeconds=0;
+    double interval=(sourceLimit>0 ? 1.0/sourceLimit : inputPeriodSeconds)/conf.multiplier;
+    auto pace=[&] {
+        if(interval>0 && previousOutput.time_since_epoch().count()) {
+            auto deadline=previousOutput+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(interval));
+            auto waitStart=std::chrono::steady_clock::now();
+            waitUntil(deadline);
+            previousPacingSeconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-waitStart).count();
+        }
+    };
+    // The prior call completes this context before recycling its resources.
+    // Current input readiness is carried by the application's wait semaphores.
+    if(frameIdx==0) DVLSFG::status("First frame: copying input");
+    DVLSFG::Readback inputCapture,generatedCapture;
+    bool capture=DVLSFG::takeCapture();
+    if(capture) {
+        try { inputCapture.create(info.device,info.physicalDevice,extent); generatedCapture.create(info.device,info.physicalDevice,extent); }
+        catch(const std::exception& e) { capture=false; DVLSFG::status(std::string("Capture allocation failed: ")+e.what()); }
+    }
+    auto& pass=passInfos[0];
+    pass=RenderPassInfo{};
+    HANDLE inputReady{};
+    pass.preCopySemaphores[0]=Mini::Semaphore(info.device,&inputReady);
+    Mini::Semaphore actualReady(info.device);
+    Mini::Semaphore generatedReady(info.device);
+    pass.preCopyBuf=Mini::CommandBuffer(info.device,cmdPool);
+    auto& before=pass.preCopyBuf;
+    before.begin();
+    barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+    if(capture) inputCapture.record(before.handle(),swapchainImages.at(index));
+    std::array<VkImage,2> frames{frame_0.handle(),frame_1.handle()};
+    for(unsigned i=0;i<2;++i) {
+        barrier(before.handle(),frames[i],frameIdx ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL,
+            frameIdx ? VK_QUEUE_FAMILY_EXTERNAL : VK_QUEUE_FAMILY_IGNORED,frameIdx ? family : VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
+        if(seedBoth || i==frameIdx%2) {
+            barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
+            blit(before.handle(),swapchainImages.at(index),frames[i],extent);
+            barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,0);
+        }
+        barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,VK_ACCESS_TRANSFER_WRITE_BIT,0);
+    }
+    if(frameIdx==0) for(auto& image:out_n) {
+        barrier(before.handle(),image.handle(),VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,0);
+        barrier(before.handle(),image.handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,0,0);
+    }
+    barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT);
+    before.end(); before.submit(info.queue.second,waits,{pass.preCopySemaphores[0].handle(),actualReady.handle()});
+    if(frameIdx==0) DVLSFG::status("First frame: input submitted");
+    std::vector<HANDLE> ready(conf.multiplier-1);
+    for(auto& handle:ready) pass.renderSemaphores.emplace_back(info.device,&handle);
+    if(conf.performance) LSFG_3_1P::presentContext(*lsfgCtxId,inputReady,ready);
+    else LSFG_3_1::presentContext(*lsfgCtxId,inputReady,ready);
+    if(frameIdx==0) DVLSFG::status("First frame: compute submitted");
+    VkResult result=VK_SUCCESS;
+    VkResult resizeResult=VK_SUCCESS;
+    size_t copiedOutputs=0;
+    unsigned presentedOutputs=0;
+    for(size_t i=0;i<out_n.size();++i) {
+        pass.acquireSemaphores.emplace_back(info.device);
+        uint32_t target{};
+        result=Layer::ovkAcquireNextImageKHR(info.device,swapchain,100000000,pass.acquireSemaphores.back().handle(),VK_NULL_HANDLE,&target);
+        if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_ERROR_SURFACE_LOST_KHR || result==VK_TIMEOUT || result==VK_NOT_READY) {
+            resizeResult=result==VK_TIMEOUT || result==VK_NOT_READY ? VK_ERROR_OUT_OF_DATE_KHR : result;
+            break;
+        }
+        if(result!=VK_SUCCESS && result!=VK_SUBOPTIMAL_KHR) throw LSFG::vulkan_error(result,"Generated-frame acquire failed");
+        if(frameIdx==0) DVLSFG::status("First frame: generated image acquired");
+        pass.postCopyBufs.emplace_back(info.device,cmdPool);
+        pass.postCopySemaphores.emplace_back(info.device);
+        auto& copy=pass.postCopyBufs.back(); copy.begin();
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,VK_QUEUE_FAMILY_EXTERNAL,family,0,VK_ACCESS_TRANSFER_READ_BIT);
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_READ_BIT);
+        barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
+        blit(copy.handle(),out_n[i].handle(),swapchainImages[target],extent);
+        if(capture && i==0) {
+            barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+            generatedCapture.record(copy.handle(),swapchainImages[target]);
+            barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+        }
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,0);
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,VK_ACCESS_TRANSFER_READ_BIT,0);
+        barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT);
+        copy.end();
+        std::vector<VkSemaphore> signals{pass.postCopySemaphores[i].handle()};
+        copy.submit(info.queue.second,{pass.acquireSemaphores[i].handle(),pass.renderSemaphores[i].handle()},signals);
+        ++copiedOutputs;
+        const auto done=pass.postCopySemaphores[i].handle();
+        VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+        present.waitSemaphoreCount=1; present.pWaitSemaphores=&done;
+        present.swapchainCount=1; present.pSwapchains=&swapchain; present.pImageIndices=&target;
+        pace();
+        result=Layer::ovkQueuePresentKHR(queue,&present);
+        previousOutput=std::chrono::steady_clock::now();
+        if(frameIdx==0) DVLSFG::status("First frame: generated image presented");
+        if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_ERROR_SURFACE_LOST_KHR) { resizeResult=result; break; }
+        if(result!=VK_SUCCESS && result!=VK_SUBOPTIMAL_KHR) throw LSFG::vulkan_error(result,"Generated-frame present failed");
+        ++presentedOutputs;
+    }
+    // Even when resize interrupts the added presents, consume every outstanding
+    // compute signal before recycling shared resources. Always reach the real
+    // present: DXVK's application present fence/ID must not be silently dropped.
+    std::vector<VkSemaphore> pending;
+    for(size_t i=copiedOutputs;i<pass.renderSemaphores.size();++i) pending.push_back(pass.renderSemaphores[i].handle());
+    std::vector<VkPipelineStageFlags> stages(pending.size(),VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    const auto drained=generatedReady.handle();
+    VkSubmitInfo drain{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    drain.waitSemaphoreCount=static_cast<uint32_t>(pending.size()); drain.pWaitSemaphores=pending.data(); drain.pWaitDstStageMask=stages.data();
+    drain.signalSemaphoreCount=1; drain.pSignalSemaphores=&drained;
+    auto submit=reinterpret_cast<PFN_vkQueueSubmit>(Layer::ovkGetDeviceProcAddr(info.device,"vkQueueSubmit"));
+    auto drainResult=submit(info.queue.second,1,&drain,VK_NULL_HANDLE);
+    if(drainResult!=VK_SUCCESS) throw LSFG::vulkan_error(drainResult,"Frame generation drain failed");
+    VkPresentInfoKHR actual{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    actual.pNext=pNext;
+    actual.swapchainCount=1; actual.pSwapchains=&swapchain; actual.pImageIndices=&index;
+    // Presentation needs an explicit semaphore dependency on the source layout
+    // transition, even when conservative host-side device waits have completed.
+    const std::array<VkSemaphore,2> sourceReady{actualReady.handle(),generatedReady.handle()};
+    actual.waitSemaphoreCount=2; actual.pWaitSemaphores=sourceReady.data();
+    pace();
+    result=Layer::ovkQueuePresentKHR(queue,&actual);
+    previousOutput=std::chrono::steady_clock::now();
+    bool realPresented=result==VK_SUCCESS || result==VK_SUBOPTIMAL_KHR;
+    if(!realPresented && result!=VK_ERROR_OUT_OF_DATE_KHR && result!=VK_ERROR_SURFACE_LOST_KHR) throw LSFG::vulkan_error(result,"Real-frame present failed");
+    waitIdle(info.device);
+    if(!realPresented) completeRejectedPresentFence(info.device,info.queue.second,pNext);
+    if(realPresented) DVLSFG::countFrame(presentedOutputs);
+    if(resizeResult!=VK_SUCCESS) { DVLSFG::status("Swapchain resize: drained generation and forwarded application present metadata"); result=resizeResult; }
+    ++frameIdx;
+    DVLSFG::recordFrameTime(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+    lastEpoch=epoch;
+    if(frameIdx==1) DVLSFG::status("Frame generation active");
+    if(capture && copiedOutputs) {
+        try {
+            auto directory=DVLSFG::captureDirectory(); std::filesystem::create_directories(directory);
+            auto name="frame-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(frameIdx)+"-"+std::to_string(GetTickCount64());
+            inputCapture.save(directory/(name+"-input.bmp"),swapchainFormat);
+            generatedCapture.save(directory/(name+"-generated.bmp"),swapchainFormat);
+            DVLSFG::status("Framebuffer comparison saved in captures/");
+        } catch(const std::exception& e) { DVLSFG::status(std::string("Capture failed: ")+e.what()); }
+    }
+    return result;
+}
