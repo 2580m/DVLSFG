@@ -21,9 +21,15 @@ file(GLOB MINI "${PORT}/src/mini/*.cpp")
 add_library(DVLSFG.Native SHARED ${BACKEND} ${MINI}
   "${PORT}/src/layer.cpp" "${PORT}/src/hooks.cpp" context_win.cpp
   "${PORT}/src/utils/utils.cpp" "${PORT}/src/extract/extract.cpp" "${PORT}/src/extract/trans.cpp"
-  runtime.cpp exports.def)
+  runtime.cpp scene_ui.cpp exports.def)
 target_include_directories(DVLSFG.Native PRIVATE . "${PORT}/include" "${PORT}/framegen/include" "${PORT}/framegen/public" "${PORT}/framegen/v3.1_include" "${PORT}/framegen/v3.1p_include" ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(DVLSFG.Native PRIVATE dxbc volk)
+find_program(GLSLANG_EXECUTABLE glslangValidator HINTS "${Vulkan_ROOT}/Bin" REQUIRED)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/scene_ui_spv.h"
+    COMMAND "${GLSLANG_EXECUTABLE}" -V --vn scene_ui_spv -o "${CMAKE_CURRENT_BINARY_DIR}/scene_ui_spv.h" "${CMAKE_CURRENT_SOURCE_DIR}/scene_ui.comp"
+    DEPENDS scene_ui.comp VERBATIM)
+target_sources(DVLSFG.Native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/scene_ui_spv.h")
+target_include_directories(DVLSFG.Native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(DVLSFG.Native PRIVATE VK_NO_PROTOTYPES)
 target_compile_options(DVLSFG.Native PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/platform.hpp")
 add_executable(DVLSFG.VulkanHost ../tests/VulkanHost.cpp)

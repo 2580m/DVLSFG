@@ -157,6 +157,6 @@ namespace DVLSFG {
     }
     public sealed class Fsr3OutputCamera : MonoBehaviour {
         internal Fsr3SceneCamera Owner;
-        void OnRenderImage(RenderTexture source,RenderTexture destination) {Graphics.Blit(Owner && Owner.OutputTarget ? Owner.OutputTarget : source,destination);}
+        void OnRenderImage(RenderTexture source,RenderTexture destination) {var image=Owner && Owner.OutputTarget ? Owner.OutputTarget : source; SceneUiRuntime.Capture(image); Graphics.Blit(image,destination);}
     }
 }

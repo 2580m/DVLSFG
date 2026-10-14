@@ -1,5 +1,29 @@
 # DVLSFG upstream provenance
 
+## Scene/UI separation (0.5.0)
+
+`src/SceneUi.cs` captures the final scene before screen-space Canvas UI. The live
+GraphicRegistry supplies UI roots without per-frame global object searches.
+Screen-space canvases are rendered over black and white in an isolated camera;
+all canvas/camera/transform/layer changes are restored in a finally block. The
+two captures preserve color and per-channel transmission, including transparent
+and additive UI. World-space canvases remain part of the scene.
+
+`native/scene_ui.cpp` uses DXVK's public IDXGIVkInteropSurface/Device ABI to access
+these textures on the existing game device. The declarations follow
+https://github.com/doitsujin/dxvk/blob/v3.1.1/src/dxgi/dxgi_interfaces.h . D3D commands
+are flushed from Unity's render-thread callback; no D3D calls occur in the present
+hook, where DXVK already owns its submission lock. Capture resources are retained
+through GPU completion. The sampled views explicitly use ARGBHalf float format,
+even when DXVK's typeless base image uses UNORM. GLSL compute copies the scene
+with the correct Y orientation, then composites UI after LSFG. The original game
+swapchain frame remains intact. Missing/stale/size-mismatched scene input bypasses
+frame generation instead of interpolating UI as a fallback.
+The UNORM swapchain path converts the captured linear scene to display-encoded
+RGB for LSFG, then decodes generated RGB for linear UI blending and encodes the
+final result. Native SRGB swapchains retain linear values. UMM's IMGUI window
+pauses scene capture; it cannot be reconstructed by the Canvas capture camera.
+
 The Windows backend is generated from lsfg-vk **v1.0.0**, MIT license:
 
 - Repository: https://git.lsfg-vk.dev/lsfg-vk-archive.git

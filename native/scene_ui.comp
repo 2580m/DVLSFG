@@ -1,0 +1,22 @@
+#version 450
+layout(local_size_x=8,local_size_y=8) in;
+layout(binding=0) uniform sampler2D scene;
+layout(binding=1) uniform sampler2D uiBlack;
+layout(binding=2) uniform sampler2D uiWhite;
+layout(binding=3,rgba16f) writeonly uniform image2D outputImage;
+layout(push_constant) uniform Parameters {uint mode;};
+vec3 encode(vec3 v) {return mix(12.92*v,1.055*pow(max(v,0.0),vec3(1.0/2.4))-.055,greaterThan(v,vec3(.0031308)));}
+vec3 decode(vec3 v) {return mix(v/12.92,pow(max((v+.055)/1.055,0.0),vec3(2.4)),greaterThan(v,vec3(.04045)));}
+void main() {
+    ivec2 p=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(p,imageSize(outputImage)))) return;
+    // Unity D3D render textures and the WSI framebuffer have opposite Y origin.
+    ivec2 uiPixel=ivec2(p.x,imageSize(outputImage).y-1-p.y);
+    bool encoded=(mode&2)!=0;
+    if((mode&1)!=0) {vec3 color=texelFetch(scene,uiPixel,0).rgb; imageStore(outputImage,p,vec4(encoded ? encode(color) : color,1)); return;}
+    vec3 black=texelFetch(uiBlack,uiPixel,0).rgb;
+    vec3 transmission=clamp(texelFetch(uiWhite,uiPixel,0).rgb-black,0.0,1.0);
+    vec3 background=texelFetch(scene,p,0).rgb;
+    vec3 color=black+(encoded ? decode(background) : background)*transmission;
+    imageStore(outputImage,p,vec4(encoded ? encode(color) : color,1.0));
+}

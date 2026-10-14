@@ -1,5 +1,44 @@
 # DVLSFG validation record
 
+## 0.5.0 scene-only frame generation
+
+Unity's postprocessed scene is captured before overlay UI, with FSR Off/1.0/3.1
+paths. The game's live GraphicRegistry supplies Canvas roots. A temporary camera
+renders UI over black/white; a finally block restores mode, camera, transform and
+layer state. DXVK interop exposes capture images to the same Vulkan device. The
+compute path binds float views of typeless ARGBHalf images, corrects Y orientation
+and converts linear/display RGB as appropriate for the swapchain. LSFG receives
+the scene only; current UI is blended after generation. The original swapchain
+frame is retained. Missing/stale captures are invalidated and bypass generation.
+UMM IMGUI and camera-space Canvas UI keep ordinary presentation.
+
+Actual GPU pixel checks passed opaque and 50%-transparent overlay UI with two
+distinct colors, across FSR Off/1.0/3.1. Captured scene samples excluded UI, and
+generated UI differed from original by at most one 8-bit channel unit. Live
+2x/3x standard and 4x performance paths passed exact generated counter ratios;
+resize to 1280x720 rebuilt captures. Canvas/layer restoration and UMM pause were
+checked. The real Continue save passed five FSR quality modes, forward/deferred,
+mouse rays, resize and FSR1/3 switches while scene/UI capture remained active.
+A static world original/generated pair differed by mean 0.206/255 over sampled
+RGB channels and retained correct orientation. This is not a motion-artifact test.
+
+The existing Vulkan host capture and swapchain recreation regressions passed;
+the latter ran with synchronization/thread validation 1.4.363. These host cases
+do not exercise the new Unity interop/compute path under validation. The new path
+is verified by real GPU readbacks and game runs, not a claim of complete Vulkan
+validation coverage. Additional UI rendering/composition has CPU/GPU cost; no
+cross-GPU performance benefit or broad custom IMGUI compatibility is established.
+
+Local evidence: build/scene-ui-pixels.log and fixture; build/scene-ui-world.log
+and build/scene-ui-world-fixture; build/scene-ui-multipliers.log and fixture; build/scene-ui-final.log and fixture;
+build/scene-ui-startup.log and build/scene-ui-startup-fixture. Production defaults
+to scene-only before UMM initializes. Camera-space UI also bypasses generation
+during multiplier reconstruction. Descriptor caches become reusable only after
+all allocations/bindings succeed. The final native build passed the host capture
+regression with validation under build/smoke-9fa9235828a14823999fb2ded5767325.
+Vulkan host evidence: build/smoke-3a4e334bface4d49b14eab1ad8f17ddd and
+build/smoke-a3cc1c5ab48349baaa5783630f7a6513.
+
 ## 0.4.15 FSR 3.1 temporal upscaling
 
 FSR3Unity's actual FSR 3.1 compute backend is ported to Unity 2019.4; it is distinct
@@ -593,7 +632,8 @@ are free of Vulkan synchronization issues.
 
 ## Limits
 
-No driving session or saved gameplay was entered. Dynamic scene artifacts,
+The original LSFG baseline did not enter a driving session or saved gameplay.
+Later FSR/scene-UI sections document their Continue-save checks. Dynamic artifacts,
 HUD ghosting, pacing on different monitors, end-to-end latency and compatibility
 with other GPUs/mods remain unverified. Non-VR SDR only. The conservative backend
 waits for device completion before reusing images; asynchronous optimization is

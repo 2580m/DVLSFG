@@ -85,6 +85,7 @@ namespace DVLSFG {
             if(inputFrameLimit!=null) inputFrameLimit(Application.targetFrameRate);
             if(getGenerationSettings!=null) RefreshGenerationSettings();
             else if(getMultiplier!=null) { int actual; getMultiplier(out actual); runtimeSettings.Multiplier=actual; }
+            SceneUiRuntime.Tick();
             FsrRuntime.Tick();
         }
         static bool Toggle(UnityModManager.ModEntry entry,bool value) {
@@ -133,7 +134,7 @@ namespace DVLSFG {
             }
         }
         static void Draw(UnityModManager.ModEntry entry) {
-            Bind(); GUILayout.Label("DV LSFG 0.4.15 — " + L10n.Get("dv_scaling/experimental"));
+            Bind(); GUILayout.Label("DV LSFG 0.5.0 — " + L10n.Get("dv_scaling/experimental"));
             GUILayout.Label((settings.FsrTechnology==2 ? "FSR 3.1: " : "FSR 1.0: ")+FsrRuntime.Status);
             GUILayout.Label(L10n.Get("dv_scaling/requires_active_dvvulkan_non_vr_sdr_only"));
             if(loaded) {

@@ -1,4 +1,13 @@
-# DV LSFG 0.4.15 (experimental)
+# DV LSFG 0.5.0 (experimental)
+
+0.5.0 excludes screen-space Canvas UI from LSFG input. The scene is interpolated,
+then current opaque/translucent UI is composited at native resolution on each
+generated frame. UI updates at the game's original frame rate. World objects,
+including locomotive instruments, remain part of the generated scene. Works with
+upscaling Off, FSR 1.0 and FSR 3.1; missing scene input keeps normal presentation.
+Opening UMM's IMGUI window pauses generation; closing it resumes generation.
+Native HUD uses overlay canvases. Camera-space canvases supplied by other mods
+also keep ordinary presentation, avoiding interpolation or duplication of baked-in UI.
 
 0.4.15 adds FSR 3.1 temporal upscaling with depth, motion vectors, projection
 jitter and frame history. Selecting it immediately disables native AA controls;

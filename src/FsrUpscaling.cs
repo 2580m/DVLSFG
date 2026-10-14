@@ -34,6 +34,7 @@ namespace DVLSFG {
             var camera=component.GetComponent<Camera>();
             if(camera && !camera.GetComponent<FsrSceneCamera>()) camera.gameObject.AddComponent<FsrSceneCamera>();
             if(camera && !camera.GetComponent<Fsr3SceneCamera>()) camera.gameObject.AddComponent<Fsr3SceneCamera>().enabled=false;
+            if(camera && !camera.GetComponent<SceneUiSceneCamera>()) camera.gameObject.AddComponent<SceneUiSceneCamera>().enabled=SceneUiRuntime.Active && !Requested;
         }
         internal static void Tick() {
             Fsr3Runtime.Tick();
@@ -190,7 +191,7 @@ namespace DVLSFG {
             var main=Camera.main;
             var mainTarget=main ? main.targetTexture : null;
             if(destination==null && mainTarget) main.targetTexture=null;
-            try {Graphics.Blit(output,destination);}
+            try {SceneUiRuntime.Capture(output); Graphics.Blit(output,destination);}
             finally {if(destination==null && mainTarget && main) main.targetTexture=mainTarget;}
         }
     }

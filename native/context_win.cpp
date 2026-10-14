@@ -108,6 +108,20 @@ LsContext::~LsContext() noexcept {
     } catch(...) {}
 }
 VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQueue queue,const std::vector<VkSemaphore>& waits,uint32_t index) {
+    auto ui=DVLSFG::acquireSceneUi(info.device,extent);
+    if(DVLSFG::sceneUiRequested() && (!ui || ui->serial==lastSceneSerial)) {
+        // Menu/loading frames retain ordinary presentation, never UI interpolation.
+        VkPresentInfoKHR actual{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR}; actual.pNext=pNext;
+        actual.waitSemaphoreCount=static_cast<uint32_t>(waits.size()); actual.pWaitSemaphores=waits.data();
+        actual.swapchainCount=1; actual.pSwapchains=&swapchain; actual.pImageIndices=&index;
+        lastEpoch=0; previousInput={}; previousOutput={};
+        return Layer::ovkQueuePresentKHR(queue,&actual);
+    }
+    if(ui) {
+        if(!uiComposite) uiComposite=std::make_shared<DVLSFG::UiComposite>(info.device,info.physicalDevice,extent,swapchainFormat);
+        std::vector<VkImage> generated; for(auto& image:out_n) generated.push_back(image.handle());
+        uiComposite->prepare(*ui,generated); lastSceneSerial=ui->serial;
+    }
     auto started=std::chrono::steady_clock::now();
     const auto& conf=Config::activeConf;
     const auto family=info.queue.first;
@@ -155,6 +169,14 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
     if(capture) inputCapture.record(before.handle(),swapchainImages.at(index));
+    VkImage sceneInput=swapchainImages.at(index);
+    if(ui) {
+        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+        sceneInput=uiComposite->record(before.handle(),out_n.size(),true);
+        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
+    }
     std::array<VkImage,2> frames{frame_0.handle(),frame_1.handle()};
     for(unsigned i=0;i<2;++i) {
         barrier(before.handle(),frames[i],frameIdx ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL,
@@ -162,7 +184,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         if(seedBoth || i==frameIdx%2) {
             barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
-            blit(before.handle(),swapchainImages.at(index),frames[i],extent);
+            blit(before.handle(),sceneInput,frames[i],extent);
             barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,0);
         }
@@ -199,12 +221,20 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         pass.postCopyBufs.emplace_back(info.device,cmdPool);
         pass.postCopySemaphores.emplace_back(info.device);
         auto& copy=pass.postCopyBufs.back(); copy.begin();
-        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,VK_QUEUE_FAMILY_EXTERNAL,family,0,VK_ACCESS_TRANSFER_READ_BIT);
-        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,VK_QUEUE_FAMILY_EXTERNAL,family,0,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT);
+        if(!ui) barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_READ_BIT);
+        VkImage generated=out_n[i].handle();
+        if(ui) {
+            for(auto image:{ui->black,ui->white}) barrier(copy.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+            generated=uiComposite->record(copy.handle(),i);
+            for(auto image:{ui->black,ui->white}) barrier(copy.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
+        }
         barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
-        blit(copy.handle(),out_n[i].handle(),swapchainImages[target],extent);
+        blit(copy.handle(),generated,swapchainImages[target],extent);
         if(capture && i==0) {
             barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
@@ -212,9 +242,9 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
             barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
         }
-        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
+        if(!ui) barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,0);
-        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,VK_ACCESS_TRANSFER_READ_BIT,0);
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT,0);
         barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT);
         copy.end();

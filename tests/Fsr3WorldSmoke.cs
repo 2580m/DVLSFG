@@ -98,6 +98,13 @@ namespace DVLSFGTests {
             var post=AccessTools.Field(typeof(Fsr3SceneCamera),"post").GetValue(fsr);
             if(post!=null && AccessTools.Field(post.GetType(),"antialiasingMode").GetValue(post).ToString()!="None") throw new Exception("Native postprocess AA remains enabled");
             if((camera.depthTextureMode & (DepthTextureMode.Depth|DepthTextureMode.MotionVectors))!=(DepthTextureMode.Depth|DepthTextureMode.MotionVectors)) throw new Exception("Temporal inputs not enabled");
+            var capture=UnityEngine.Object.FindObjectOfType<SceneUiCapture>();
+            if(capture) {
+                var captured=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"scene").GetValue(capture);
+                if(!captured || captured.width!=Screen.width || captured.height!=Screen.height || (int)AccessTools.Field(typeof(SceneUiCapture),"CanvasCount").GetValue(capture)<1) throw new Exception("Scene/UI world capture is inactive");
+                foreach(var canvas in UnityEngine.Object.FindObjectsOfType<Canvas>()) if(canvas.isRootCanvas && canvas.renderMode!=RenderMode.WorldSpace && canvas.gameObject.layer==31) throw new Exception("UI layer was not restored after capture");
+                Log("PASS scene/UI world capture "+captured.width+"x"+captured.height+" canvases="+AccessTools.Field(typeof(SceneUiCapture),"CanvasCount").GetValue(capture));
+            }
             Log("PASS "+stage+" camera="+camera.name+" target="+camera.targetTexture.width+"x"+camera.targetTexture.height+" output="+output.width+"x"+output.height+" rendering="+camera.actualRenderingPath+" post-AA="+(post==null ? "no PPV2 layer" : "None")+" native MSAA disabled, depth/motion enabled, finite pixels and picking rays");
         }
         void Restore() {if(settings!=null) {settings.FsrMode=oldMode; settings.FsrTechnology=oldTechnology;} Screen.SetResolution(oldWidth,oldHeight,oldScreenMode);}
