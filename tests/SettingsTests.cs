@@ -6,7 +6,7 @@ class SettingsTests {
     static void Assert(bool value,string message) { if(!value) throw new Exception(message); }
     static int Main(string[] args) {
         string path=Path.Combine(args[0],"settings-test.ini");
-        var settings=new Settings { Enabled=true,DllPath="C:\\测试 路径\\Lossless.dll",Multiplier=4,Performance=true,FlowScale=.5f };
+        var settings=new Settings { Enabled=true,DllPath="C:\\测试 路径\\Lossless.dll",Multiplier=4,Performance=true,FlowScale=.5f,FsrMode=2,FsrSharpness=.3f };
         var original=CultureInfo.CurrentCulture;
         try {
             System.Threading.Thread.CurrentThread.CurrentCulture=new CultureInfo("de-DE");
@@ -14,6 +14,22 @@ class SettingsTests {
             var restored=Settings.Read(path);
             Assert(restored.Enabled && restored.Multiplier==4 && restored.Performance && restored.FlowScale==.5f && restored.DllPath==settings.DllPath,"UTF8/invariant roundtrip failed");
             Assert(!File.Exists(path+".tmp"),"Atomic save left temp file");
+            Assert(restored.FsrMode==2 && restored.FsrSharpness==.3f,"FSR persistence failed");
+            File.WriteAllText(path,"Enabled=1\nMultiplier=4\nFlowScale=0.75\n");
+            var legacy=Settings.Read(path);
+            Assert(legacy.FsrMode==0 && legacy.FsrSharpness==.2f && legacy.Multiplier==4,"Legacy config migration changed behavior");
+            foreach(float invalid in new[]{float.NaN,float.PositiveInfinity,-.1f,1.1f}) {
+                settings.FsrSharpness=invalid;
+                bool rejected=false; try {settings.Validate();} catch(InvalidDataException) {rejected=true;}
+                Assert(rejected,"Invalid FSR sharpness accepted");
+            }
+            settings.FsrSharpness=.2f;
+            foreach(int invalid in new[]{-1,5}) {
+                settings.FsrMode=invalid;
+                bool rejected=false; try {settings.Validate();} catch(InvalidDataException) {rejected=true;}
+                Assert(rejected,"Invalid FSR mode accepted");
+            }
+            settings.FsrMode=0;
             foreach(float invalid in new[]{float.NaN,float.PositiveInfinity,0f,1.1f}) {
                 settings.FlowScale=invalid;
                 bool rejected=false; try { settings.Validate(); } catch(InvalidDataException) { rejected=true; }

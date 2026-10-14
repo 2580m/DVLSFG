@@ -46,3 +46,4 @@ $mismatch=Join-Path $fixture 'dxgi.dll'
 & "$mod/DVLSFG.Launcher.exe"
 if($LASTEXITCODE -eq 0 -or (Test-Path $capture)) { throw 'DXVK mismatch accepted' }
 Write-Output "Launcher fixture checks passed: child env, disabled guard, recovery, DLL conflict. $fixture"
+exit 0 # The last native invocation deliberately failed to verify the DXVK guard.

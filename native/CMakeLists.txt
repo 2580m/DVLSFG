@@ -40,3 +40,25 @@ add_custom_command(OUTPUT "${BOOTSTRAP}/bootstrap.obj"
 set_source_files_properties("${BOOTSTRAP}/bootstrap.obj" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
 add_library(DVLSFG.Bootstrap SHARED bootstrap.cpp "${BOOTSTRAP}/bootstrap.obj" "${BOOTSTRAP}/bootstrap.def")
 target_include_directories(DVLSFG.Bootstrap PRIVATE "${BOOTSTRAP}")
+
+# Compile AMD's MIT-licensed FSR1 shaders offline: no Unity editor, runtime compiler,
+# Vulkan-device sharing, or additional D3D11 DLL shim is needed for the upscaler.
+get_filename_component(WINDOWS_KITS "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]" ABSOLUTE)
+find_program(FXC_EXECUTABLE fxc HINTS "${WINDOWS_KITS}/bin/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/x64" REQUIRED)
+set(FSR_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/fsr1")
+foreach(PASS easu rcas)
+    if(PASS STREQUAL "easu")
+        set(EASU_DEFINE 1)
+    else()
+        set(EASU_DEFINE 0)
+    endif()
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fsr_${PASS}.h"
+        COMMAND "${FXC_EXECUTABLE}" /nologo /O3 /T cs_5_0 /E main /D "FSR_EASU=${EASU_DEFINE}"
+          /I "${FSR_SOURCE}" /Vn "g_fsr_${PASS}" /Fh "${CMAKE_CURRENT_BINARY_DIR}/fsr_${PASS}.h"
+          "${CMAKE_CURRENT_SOURCE_DIR}/fsr1.hlsl"
+        DEPENDS fsr1.hlsl "${FSR_SOURCE}/ffx_a.h" "${FSR_SOURCE}/ffx_fsr1.h" VERBATIM)
+endforeach()
+add_library(DVLSFG.FSR SHARED fsr_unity.cpp "${CMAKE_CURRENT_BINARY_DIR}/fsr_easu.h" "${CMAKE_CURRENT_BINARY_DIR}/fsr_rcas.h")
+target_include_directories(DVLSFG.FSR PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${FSR_SOURCE}")
+add_executable(DVLSFG.FsrGpuTests ../tests/FsrGpu.cpp)
+target_link_libraries(DVLSFG.FsrGpuTests PRIVATE DVLSFG.FSR)

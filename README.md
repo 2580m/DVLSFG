@@ -2,6 +2,9 @@
 
 Independent Derail Valley / Unity Mod Manager mod for experimental LSFG 3.1 frame
 generation through a Windows Vulkan layer. Requires DVVulkan with deployed DXVK.
+Version 0.4.5 uses native hover descriptions, supports live LSFG multiplier/model/flow changes and game-integrated AMD FSR 1.0 spatial upscaling.
+FSR reduces scene-camera rendering resolution, preserves screen output resolution,
+and runs before the existing LSFG presentation path. Both controls use native Apply/Discard.
 UMM automatically installs a game-local Vulkan bootstrap. After the first restart,
 normal Steam/game-shortcut launches load frame generation without a launch script.
 
@@ -20,10 +23,17 @@ and the game's Unity / UMM / I2 managed references. Download pinned dependencies
 ```
 
 `port.ps1` generates the Win32 port under `build/port`; edit the transformation or
-native sources, not generated files. The archive is `dist/DVLSFG-0.3.2.zip`.
+native sources, not generated files. The archive is `dist/DVLSFG-0.4.6.zip`.
 The bootstrap generator reads the local system loader's export names/ordinals and
 builds x64 argument-preserving forwarding stubs; no system loader binary is bundled.
-No vendor binaries, extracted shaders or user model paths are distributed.
+No Lossless.dll, extracted LSFG shaders or user model paths are distributed.
+FSR1's MIT-licensed shaders are compiled and embedded at build time. Building FSR
+also requires Windows SDK FXC; no Unity editor or user-side shader compiler is needed.
+
+FSR GPU tests: `build/native/Release/DVLSFG.FsrGpuTests.exe`, optionally followed by
+the absolute path to the game's DXVK `d3d11.dll`. `tests/Install-GameFixture.ps1`
+installs temporary Synthetic, World, or Ui UMM fixtures; remove/move those fixtures
+after testing. World tests use the existing Continue save, not a new game.
 
 ## GPU verification
 

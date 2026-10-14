@@ -28,6 +28,9 @@ static void check(VkResult r) { if(r!=VK_SUCCESS && r!=VK_SUBOPTIMAL_KHR) throw 
 int main(int argc,char** argv) {
     try {
         bool toggle=argc>1 && std::string(argv[1])=="--toggle";
+        bool live=argc>1 && std::string(argv[1])=="--live";
+        bool liveSettings=argc>1 && std::string(argv[1])=="--live-settings";
+        bool recoverySettings=argc>1 && std::string(argv[1])=="--recovery-settings";
         bool recreate=argc>1 && std::string(argv[1])=="--recreate";
         bool metadata=argc>1 && std::string(argv[1])=="--metadata";
         bool resizePresent=argc>1 && std::string(argv[1])=="--resize-present";
@@ -44,11 +47,12 @@ int main(int argc,char** argv) {
             if(value.starts_with("--rate=")) inputLimit=std::stod(value.substr(7));
             if(value=="--visible") visible=true;
             if(value=="--display-proof") { displayProof=true; visible=true; }
+            if(value=="--resize-present") { resizePresent=true; metadata=true; }
         }
         HINSTANCE module=GetModuleHandleW(nullptr);
         WNDCLASSW cls{}; cls.lpfnWndProc=DefWindowProcW; cls.hInstance=module; cls.lpszClassName=L"DVLSFGTest";
         RegisterClassW(&cls);
-        HWND window=CreateWindowW(cls.lpszClassName,L"DVLSFG hidden test",WS_OVERLAPPEDWINDOW,0,0,640,480,nullptr,nullptr,module,nullptr);
+        HWND window=CreateWindowW(cls.lpszClassName,L"DVLSFG hidden test",WS_OVERLAPPEDWINDOW,0,0,recoverySettings?256:640,recoverySettings?256:480,nullptr,nullptr,module,nullptr);
         if(!window) throw std::runtime_error("Hidden window creation failed");
         if(visible) {
             // STARTUPINFO may force the first ShowWindow call to remain hidden.
@@ -99,6 +103,17 @@ int main(int argc,char** argv) {
         using SetLimit=void(*)(int);
         auto setLimit=nativeModule ? reinterpret_cast<SetLimit>(GetProcAddress(nativeModule,"DVLSFG_SetInputFrameLimit")) : nullptr;
         if(setLimit) setLimit(static_cast<int>(inputLimit));
+        using SetMultiplier=int(*)(int);
+        using GetMultiplier=int(*)(int*);
+        auto setMultiplier=nativeModule ? reinterpret_cast<SetMultiplier>(GetProcAddress(nativeModule,"DVLSFG_SetMultiplier")) : nullptr;
+        auto getMultiplier=nativeModule ? reinterpret_cast<GetMultiplier>(GetProcAddress(nativeModule,"DVLSFG_GetMultiplier")) : nullptr;
+        if(live && (!setMultiplier || !getMultiplier)) throw std::runtime_error("Live multiplier API missing");
+        using SetGeneration=int(*)(int,int,float);
+        using GetGeneration=int(*)(int*,int*,float*);
+        auto setGeneration=nativeModule ? reinterpret_cast<SetGeneration>(GetProcAddress(nativeModule,"DVLSFG_SetGenerationSettings")) : nullptr;
+        auto getGeneration=nativeModule ? reinterpret_cast<GetGeneration>(GetProcAddress(nativeModule,"DVLSFG_GetGenerationSettings")) : nullptr;
+        if((liveSettings || recoverySettings) && (!setGeneration || !getGeneration)) throw std::runtime_error("Live generation API missing");
+        int desiredMultiplier=2,desiredPerformance=0; float desiredFlow=1.f;
         struct PixelSample { double milliseconds; unsigned red,green,blue; };
         std::vector<PixelSample> screenPixels;
         std::atomic<bool> sampling{displayProof};
@@ -148,6 +163,42 @@ int main(int argc,char** argv) {
             });
         }
         for(unsigned frame=0;frame<frameCount;++frame) {
+            if(recoverySettings) {
+                if(frame==2) { if(!setGeneration(2,0,.25f)) throw std::runtime_error("Recovery request rejected prematurely"); }
+                if(frame==3) { if(!setGeneration(2,0,1.f)) throw std::runtime_error("Restoring already-active settings was rejected"); }
+                if(frame==4 || frame==6) {
+                    desiredPerformance=frame==4 ? 1 : 0; desiredFlow=frame==4 ? .5f : .75f;
+                    if(!setGeneration(2,desiredPerformance,desiredFlow)) throw std::runtime_error("Recovery request rejected");
+                }
+                if(frame==11) reinterpret_cast<void(*)()>(GetProcAddress(nativeModule,"DVLSFG_RequestCapture"))();
+            }
+            if(liveSettings) {
+                if(frame%2==0) {
+                    desiredMultiplier=frame==4?3:frame==6?4:2;
+                    desiredPerformance=(frame==4 || frame==8)?1:0;
+                    desiredFlow=frame==2 || frame==10?.75f:frame==4?.5f:frame==6?.25f:1.f;
+                    if(setGeneration(1,0,1) || setGeneration(2,2,1) || setGeneration(2,0,.2f) || setGeneration(2,0,1.1f) || setGeneration(2,0,NAN)) throw std::runtime_error("Invalid generation settings accepted");
+                    if(frame==6) {setGeneration(2,1,.75f);setGeneration(3,0,.5f);}
+                    if(!setGeneration(desiredMultiplier,desiredPerformance,desiredFlow)) throw std::runtime_error("Generation request rejected");
+                }
+                auto enable=reinterpret_cast<void(*)(int)>(GetProcAddress(nativeModule,"DVLSFG_SetEnabled"));
+                if(frame==3) enable(0);
+                if(frame==5) enable(1);
+                if(frame==11) reinterpret_cast<void(*)()>(GetProcAddress(nativeModule,"DVLSFG_RequestCapture"))();
+            }
+            if(live) {
+                if(frame==3 || frame==4 || frame==6 || frame==9) {
+                    int next=frame==3?3:frame==4?4:frame==6?4:2;
+                    if(setMultiplier(1) || setMultiplier(5)) throw std::runtime_error("Invalid multiplier accepted");
+                    if(frame==6) { setMultiplier(2); setMultiplier(3); }
+                    if(!setMultiplier(next)) throw std::runtime_error("Multiplier request rejected");
+                }
+                using Enable=void(*)(int);
+                auto enable=reinterpret_cast<Enable>(GetProcAddress(nativeModule,"DVLSFG_SetEnabled"));
+                if(frame==4) enable(0);
+                if(frame==5) enable(1);
+                if(frame==10) reinterpret_cast<void(*)()>(GetProcAddress(nativeModule,"DVLSFG_RequestCapture"))();
+            }
             if(inputLimit>0) std::this_thread::sleep_until(testStart+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(frame/inputLimit)));
             MSG msg; while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
             if(secondary && frame==3) {
@@ -198,6 +249,19 @@ int main(int argc,char** argv) {
                 MSG resizeMessage; while(PeekMessageW(&resizeMessage,nullptr,0,0,PM_REMOVE)) { TranslateMessage(&resizeMessage); DispatchMessage(&resizeMessage); }
             }
             auto presentResult=vkQueuePresentKHR(queue,&present);
+            if(liveSettings || recoverySettings) {
+                int multiplier,performance; float flow;
+                int expectedState=recoverySettings && frame==2 ? -1 : 0;
+                if(getGeneration(&multiplier,&performance,&flow)!=expectedState || multiplier!=desiredMultiplier || performance!=desiredPerformance || flow!=desiredFlow)
+                    throw std::runtime_error("Generation settings not applied at present boundary");
+                std::cout<<"SETTINGS PASS frame="<<frame<<" multiplier="<<multiplier<<" performance="<<performance<<" flow="<<flow<<std::endl;
+            }
+            if(live) {
+                int actual=0; int change=getMultiplier(&actual);
+                int expected=frame<3?2:frame==3?3:frame<9?4:2;
+                if(change!=0 || actual!=expected) throw std::runtime_error("Live multiplier did not apply at present boundary");
+                std::cout<<"LIVE PASS frame="<<frame<<" multiplier="<<actual<<std::endl;
+            }
             if(presentResult!=VK_ERROR_OUT_OF_DATE_KHR) check(presentResult);
             std::cout<<"Host frame "<<frame<<": presented, result="<<presentResult<<std::endl; check(vkQueueWaitIdle(queue));
             if(metadata) {

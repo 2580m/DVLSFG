@@ -14,6 +14,9 @@ bool takeCapture();
 std::filesystem::path captureDirectory();
 void recordFrameTime(double milliseconds);
 int inputFrameLimit();
+struct GenerationSettings { int multiplier; bool performance; float flowScale; };
+bool takeGenerationRequest(GenerationSettings& value);
+void generationApplied(const GenerationSettings& value, bool success);
 void externalBarrier(VkCommandBuffer buffer, VkImage image, unsigned family, bool acquire);
 // The private backend must not re-enter the game's explicit Vulkan layer.
 class BackendScope {

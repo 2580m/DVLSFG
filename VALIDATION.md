@@ -1,5 +1,198 @@
 # DVLSFG validation record
 
+## 0.4.6 FSR selector order
+
+The selector now displays Off→Performance→Balanced→Quality→Ultra Quality.
+Nonzero selector indexes map to persisted modes with 5-index, and Refresh uses
+the inverse mapping. Mode 0 remains Off; existing saved modes and FSR rendering
+scales are unchanged. The existing UI smoke assertion follows the new mapping.
+Managed compilation passed; no additional game/GPU run was needed for this UI-only change.
+
+## 0.4.5 live model and flow quality
+
+Model and flow scale join multiplier in one synchronized request/snapshot API. The
+present-thread rebuild finalizes both backend variants after context destruction,
+then initializes the selected model with its new flow scale. Partial backend
+initialization is also cleaned up during finalize. Managed settings retain actual
+applied values until native completion. Legacy multiplier exports remain compatible.
+DLL paths and loading the layer after an off startup still require restart.
+
+GPU validation passed Standard↔Performance and flow 25/50/75/100%, combined
+multiplier/model/flow requests, disabled-period changes, coalesced requests, and
+invalid arguments including NaN. The mixed sequence produced 10 generated input
+presents / 15 generated frames, with an independent trace of 27 actual WSI presents.
+After the final switch, previous/current red values 212/234 produced generated red
+223. The interleaved resize/fence test and legacy multiplier regression were clean.
+A small valid swapchain makes flow 25% unsupported; the recovery test verified
+failure state, restoration of the previous flow and continued rendering, followed
+by successful switches to Performance/50% and Standard/75%, with clean validation.
+
+Game Graphics Apply verified model and flow take effect without restarting and
+restore correctly. Labels are now “帧生成倍率” and “帧生成模型”; the multiplier
+restart/pause paragraph and model/flow restart notes are removed. Native footer,
+Apply/Discard and sharpening regressions passed. No Computer Use was used.
+Evidence: build/live-settings-smoke.log, live-settings-resize.log,
+live-settings-recovery.log, live-settings-multiplier-regression.log,
+live-settings-ui.log and live-settings-ui-native.log.
+
+With FSR active in the existing game save, all eight combinations completed:
+
+| Multiplier | Model | Flow | Input | Generated |
+| --- | --- | ---: | ---: | ---: |
+| 2x | Standard | 25% | 163 | 163 |
+| 3x | Performance | 50% | 240 | 480 |
+| 4x | Standard | 75% | 236 | 708 |
+| 2x | Performance | 100% | 248 | 248 |
+| 3x | Standard | 25% | 245 | 490 |
+| 4x | Performance | 50% | 236 | 708 |
+| 2x | Standard | 75% | 248 | 248 |
+| 4x | Performance | 100% | 237 | 711 |
+
+The fixture now waits for at least ten completed FSR GPU frames and valid target
+dimensions, after an initial fixed-delay check raced scene startup. These counts
+verify generation execution, not perceived smoothness or overlay counting.
+First-person/external views, all FSR modes and a 1280x720 resize at Performance/4x
+passed. Original Standard/2x, flow 75%, FSR Balanced and sharpening 75% settings
+were restored; the game was closed and temporary fixtures removed. World evidence:
+build/live-settings-world-fixture/world.log and build/live-settings-world-native.log.
+Automatic bootstrap's seven scenarios and the launcher's environment, disabled,
+recovery and DLL-conflict guards passed (build/live-settings-bootstrap.log and
+build/live-settings-launcher.log); the DLL probe translated all 52 shader mappings.
+
+## 0.4.4 native descriptions
+
+Graphics now contains five editable selectors and one sharpening slider. Removed
+the four read-only LSFG status/apply and FSR render/output/apply rows. Each control
+uses the game's UIElementTooltip and a dynamic custom description through the
+native TooltipHandler footer. LSFG enable help includes current status; model help
+has separate Standard/Performance lines and its restart requirement; flow quality
+also explains restart. FSR mode/sharpening help includes runtime rendering/output
+and omits any apply-timing notice. Visible panel refresh updates changing descriptions;
+hidden panels still perform no periodic object scans.
+
+Actual game fixture verified all six controls route their descriptions to the native
+footer, model help contains three lines, and the four status/prompt controls are absent.
+Apply/Discard, LSFG toggles, FSR modes and 0/37/100% sharpening regressions passed.
+
+## 0.4.3 live multiplier
+
+The managed UI posts a validated 2x/3x/4x request. The next intercepted present
+serializes it with swapchain creation/destruction, destroys contexts after both
+devices finish, finalizes the backend whose generation count is fixed at initialization,
+and recreates contexts from retained swapchain/image metadata. It resets history and
+pacing without replacing the game's WSI swapchain. Failure attempts to restore the
+previous multiplier; if recovery also fails, original presents continue without synthesis.
+Model, flow scale and DLL changes remain restart-only. An off startup still requires
+restart to load the generation layer. Allocation/device-loss recovery is implemented,
+but deliberate GPU OOM/device-loss injection was not tested.
+
+Standard and performance GPU smoke tests passed 2→3→4→2, a disabled-period change,
+invalid values, and coalesced requests, with 11 synthesized input presents / 20 generated
+frames. An independent API dump counted the expected 32 actual vkQueuePresentKHR
+calls (12 original plus 20 generated). Vulkan synchronization and lifetime validation was clean, including interleaved
+resize with application present metadata/fences. After switching back to 2x, framebuffer
+samples were previous red=191, generated=202 (standard)/201 (performance), current=212.
+This verifies interpolation, not perceived motion smoothness or RTSS counting.
+
+Actual game UI Apply/Discard, enable toggle and sharpening regression passed. In the
+existing save with FSR active, successive sampling windows recorded:
+
+| Multiplier | Input frames | Generated frames |
+| --- | ---: | ---: |
+| 3x | 240 | 480 |
+| 4x | 225 | 675 |
+| 2x | 247 | 247 |
+| 4x | 234 | 702 |
+
+First-person/external views and all FSR modes passed. At 4x, resizing to 1280x720
+and restoring 1920x1080 completed without hanging. The original 2x, flow 75%, FSR
+Balanced, sharpening 75% configuration was restored; temporary fixtures were removed
+from the game and the test game was closed. Automatic bootstrap (seven paths), launcher
+guards and 52-shader DLL compatibility checks passed.
+Evidence: build/live-smoke.log, live-performance.log, live-resize.log, live-ui.log,
+live-world-fixture/world.log, live-world-native.log, live-bootstrap.log, live-launcher.log.
+
+## 0.4.2 FSR sharpening slider
+
+FSR sharpening now uses an inactive clone of the game's native SliderDV settings
+control, with original preference/localization bindings removed before activation.
+The slider ranges from 0 to 100 with whole-number steps and a live percentage
+readout; values remain pending until the original Apply action. Graphics contains
+nine selectors plus one slider, with the existing scroll/preset divider preserved.
+The game fixture verifies 0%, 37%, 100%, percentage text, Apply/Discard and saved
+values. Actual mouse dragging changes 70% to 36% and enables Apply/Discard; clicking
+Discard restores 70%. Native layout was visually inspected. Evidence: build/slider-ui.log.
+
+## 0.4.1 periodic FSR hitch
+
+The user's Quality FSR (sharpness 0.7), standard LSFG 2x/flow 0.75 configuration
+reproduces a half-second hitch in an existing save at 1920x1080. A temporary UMM
+fixture instruments FsrRuntime.Tick and GraphicsSettingsPanel.Refresh with Harmony,
+buffers per-frame timings/GC counts in memory, and writes CSV only after sampling.
+The 0.4.0 baseline contains 3101 frames over 40 seconds: median 11.9473 ms,
+p99 57.9456 ms, maximum 64.9613 ms. All 80 periodic global scans correspond to
+the next frame's long interval (mean 57.8455 ms); other intervals average 11.7289 ms
+and peak at 12.896 ms. Individual scans take about 52 ms. GC0 remains 106 and
+hidden UI refresh is 0 ms throughout this trace.
+
+0.4.1 discovers pre-existing cameras once when FSR is enabled, then registers new
+game cameras through CameraGraphicsUpdater.Awake. FsrSceneCamera maintains a small
+lifetime-bound registry used for status queries; no global scan occurs during
+steady gameplay. Hidden Graphics panels no longer periodically rebuild their rows.
+The LSFG/native rendering binaries and synchronization behavior are unchanged.
+Evidence: build/pacing-baseline.csv and pacing-baseline.log; follow-up data is
+recorded in build/pacing-fixed.csv and pacing-fixed.log.
+The same-config 0.4.1 trace contains 3298 frames: median 12.1007 ms, p99
+12.7350 ms, maximum 57.9208 ms. FSR Tick peaks at 0.0124 ms with zero calls
+over 0.3 ms; frames over 30 ms fall from 80 to one. That one isolated long
+frame is not a periodic FSR scan (Tick 0.0008 ms, no GC transition). The fixed
+half-second hitch is resolved; this is not a claim of zero long frames or a
+universal performance uplift. User configuration is preserved.
+The native Graphics preview, LSFG and FSR Apply/Discard, and toggle/status regression
+all pass with 0.4.1 (build/pacing-ui-regression.log).
+
+## 0.4.0 FSR 1.0 integration
+
+FSR uses the official pinned AMD EASU/RCAS implementation on Unity's D3D11 device,
+translated by the installed DXVK 3.1.1. Both system D3D11 and game DXVK GPU tests
+passed display-encoded constant colors, odd-size borders, and compute-state
+restoration. A 67x39 diagonal-edge input upscaled to 127x73 differs from analytic
+bilinear interpolation in 331 pixels by more than 3/255 (maximum difference 42/255).
+Zero sharpening uses EASU without RCAS and passes the color/border test.
+
+Game tests use Unity 2019.4.40f1, installed DVVulkan 1.0.1, standard LSFG 4x and
+flow scale 0.75. A synthetic forward camera passes all four modes, MSAA 8x,
+enable/disable, camera disable/re-enable, and 2560x1440 <-> 1280x720 resizing.
+At Quality the actual input is 1707x960 for 2560x1440 output. Readbacks preserve
+RGBA(128,64,191,255). Early hidden-window runs did not render scene cameras;
+those are failed tests, not GPU or display evidence. Early command-buffer output
+also produced a black screenshot despite valid FSR texture data; final compositing
+uses the OnRenderImage display destination and avoids Camera.main's low-resolution
+target fallback. The final asynchronous PNG screen readback matches the FSR texture
+at RGBA(128,64,191,255); the overlay marker remains RGBA(255,255,255,255).
+A synchronous texture readback at WaitForEndOfFrame hung the test fixture; that
+diagnostic is not used by the mod or counted as passing evidence. The asynchronous
+screen-capture path passes without the end-of-frame GPU readback.
+
+An existing Continue save passes actual deferred first-person and ExternalCam
+selection, all quality modes, and live resize with LSFG 4x. Camera ownership and
+pre-test resolution/FSR mode are restored. Actual game screenshots were inspected;
+the HUD, hotbar, interaction info and auxiliary canvases remain Screen Space Overlay.
+Native Graphics has ten selectors, and LSFG/FSR Apply/Discard/persistence tests pass.
+Ordinary bootstrap's seven Enabled/Disabled/UMMDisabled/DependencyDisabled/MissingMod/
+DXVKConflict/Recovery cases also pass. Launcher testing must run after the real game
+exits; its initial rejection of a simultaneously running game is expected.
+
+Evidence: build/fsr-final-gpu-dxvk.log, fsr-world-clean-final.log,
+fsr-world-pass/world-quality.png, fsr-world-pass/external-quality.png,
+fsr-ui-world-final.log, fsr-bootstrap-regression.log and fsr-screen-final-pass.log.
+The current game-scene test is a stationary daytime scene. Driving motion, rain,
+night, every postprocessing combination, and broad GPU compatibility are not fully
+validated. No FSR performance uplift or input-latency figure is claimed. The full
+postprocess stack currently precedes FSR, including any enabled grain; LSFG continues
+to process output-resolution images. No game frame limit or present mode is changed
+by FSR. Original DLL path/model/multiplier/flow settings and DVVulkan files are preserved.
+
 ## 0.3.2 resolution-change recovery
 
 The user reported a hang while applying a resolution change with standard 4x,

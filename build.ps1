@@ -30,12 +30,14 @@ New-Item -ItemType Directory $output -Force | Out-Null
 Copy-Item "$project/package/*" $output -Force -Recurse
 Copy-Item "$project/build/native/Release/DVLSFG.Native.dll" $output -Force
 Copy-Item "$project/build/native/Release/DVLSFG.Bootstrap.dll" $output -Force
+Copy-Item "$project/build/native/Release/DVLSFG.FSR.dll" $output -Force
+Copy-Item "$project/vendor/fsr1/license.txt" "$output/FSR1-LICENSE.txt" -Force
 Copy-Item "$project/vendor/lsfg-vk/LICENSE.md" "$output/LSFG-VK-LICENSE.md" -Force
 Copy-Item "$project/vendor/lsfg-vk/thirdparty/dxbc/LICENSE.md" "$output/DXBC-LICENSE.md" -Force
 Copy-Item "$project/vendor/lsfg-vk/thirdparty/volk/LICENSE.md" "$output/VOLK-LICENSE.md" -Force
 Copy-Item "$project/UPSTREAM.md" $output -Force
 Copy-Item "$project/VALIDATION.md" $output -Force
-& $compiler /nologo /target:library /platform:x64 /optimize+ "/out:$output\DVLSFG.dll" "/reference:$managed\UnityModManager\UnityModManager.dll" "/reference:$managed\UnityModManager\0Harmony.dll" "/reference:$managed\UnityEngine.CoreModule.dll" "/reference:$managed\UnityEngine.IMGUIModule.dll" "/reference:$managed\UnityEngine.UIModule.dll" "/reference:$managed\UnityEngine.TextRenderingModule.dll" "/reference:$managed\UnityEngine.UI.dll" "/reference:$managed\Unity.TextMeshPro.dll" "/reference:$managed\DV.UI.dll" "/reference:$managed\DV.UIFramework.dll" "/reference:$managed\I2.Localization.dll" "$project\src\Main.cs" "$project\src\Settings.cs" "$project\src\GraphicsSettings.cs" "$project\src\AutoStartup.cs" "$project\src\BootstrapDeployment.cs"
+& $compiler /nologo /target:library /platform:x64 /optimize+ "/out:$output\DVLSFG.dll" "/reference:$managed\UnityModManager\UnityModManager.dll" "/reference:$managed\UnityModManager\0Harmony.dll" "/reference:$managed\UnityEngine.CoreModule.dll" "/reference:$managed\UnityEngine.IMGUIModule.dll" "/reference:$managed\UnityEngine.UIModule.dll" "/reference:$managed\UnityEngine.TextRenderingModule.dll" "/reference:$managed\UnityEngine.UI.dll" "/reference:$managed\Unity.TextMeshPro.dll" "/reference:$managed\DV.UI.dll" "/reference:$managed\DV.UIFramework.dll" "/reference:$managed\I2.Localization.dll" "$project\src\FsrUpscaling.cs" "$project\src\Main.cs" "$project\src\Settings.cs" "$project\src\GraphicsSettings.cs" "$project\src\AutoStartup.cs" "$project\src\BootstrapDeployment.cs"
 if($LASTEXITCODE) { throw 'UMM compilation failed' }
 & $compiler /nologo /target:exe /platform:x64 /optimize+ "/out:$output\DVLSFG.BootstrapWorker.exe" "$project\src\BootstrapWorker.cs" "$project\src\BootstrapDeployment.cs"
 if($LASTEXITCODE) { throw 'Bootstrap worker compilation failed' }

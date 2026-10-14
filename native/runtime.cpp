@@ -17,7 +17,7 @@
 #include <iomanip>
 
 Config::Configuration Config::activeConf{};
-void Config::updateConfig(const std::string&) {} // Settings are applied on process restart.
+void Config::updateConfig(const std::string&) {} // Live multiplier requests use the present-boundary API.
 Config::Configuration Config::getConfig(const std::pair<std::string,std::string>&) { return activeConf; }
 extern const std::unordered_map<std::string, uint32_t> nameIdxTable;
 namespace {
@@ -30,6 +30,10 @@ std::atomic<unsigned long long> realFrames{0}, generatedFrames{0};
 std::atomic<unsigned long long> generationEpoch{1};
 std::atomic<bool> capturePending{false};
 std::atomic<int> gameFrameLimit{0};
+std::mutex settingsLock;
+DVLSFG::GenerationSettings requestedSettings{2,false,1.f}, appliedSettings{2,false,1.f};
+bool settingsPending=false;
+int settingsState=0;
 std::filesystem::path configPath;
 std::mutex metricsLock;
 std::mutex toggleLock;
@@ -40,6 +44,18 @@ unsigned long long previousReal=0,previousGenerated=0;
 std::chrono::steady_clock::time_point previousTime{};
 }
 namespace DVLSFG {
+bool takeGenerationRequest(GenerationSettings& value) {
+    std::lock_guard<std::mutex> guard(settingsLock);
+    if(!settingsPending) return false;
+    value=requestedSettings; settingsPending=false; return true;
+}
+void generationApplied(const GenerationSettings& value, bool success) {
+    { std::lock_guard<std::mutex> guard(settingsLock); appliedSettings=value; settingsState=success ? 0 : -1; }
+    ++generationEpoch;
+    std::lock_guard<std::mutex> guard(metricsLock);
+    inputRate=submittedRate=meanFrameMs=maxFrameMs=0;
+    frameSum=frameMax=0; frameSamples=0; previousTime={};
+}
 int inputFrameLimit() { return gameFrameLimit.load(); }
 void status(const std::string& message) {
     std::lock_guard<std::mutex> guard(lock);
@@ -130,6 +146,7 @@ void initialize() {
             conf.performance = values["Performance"] == "1";
             conf.flowScale = std::stof(values["FlowScale"]);
             if (!(conf.flowScale >= 0.25f && conf.flowScale <= 1.f)) throw std::runtime_error("FlowScale must be 0.25..1");
+            { std::lock_guard<std::mutex> guard(settingsLock); appliedSettings={static_cast<int>(conf.multiplier),conf.performance,conf.flowScale}; }
             conf.e_present = VK_PRESENT_MODE_IMMEDIATE_KHR;
             conf.hdr = false;
             if (values["Enabled"] != "1") { status("Disabled in config.ini"); return; }
@@ -162,6 +179,32 @@ extern "C" __declspec(dllexport) void DVLSFG_SetEnabled(int value) {
     if(next) { ++generationEpoch; enabled=true; }
 }
 extern "C" __declspec(dllexport) void DVLSFG_RequestCapture() { capturePending=true; }
+// The UI only posts requests. Vulkan objects/configuration are changed at a present boundary.
+extern "C" __declspec(dllexport) int DVLSFG_SetMultiplier(int value) {
+    if(value<2 || value>4 || !Config::activeConf.enable) return 0;
+    std::lock_guard<std::mutex> guard(settingsLock);
+    if(!settingsPending) requestedSettings=appliedSettings;
+    requestedSettings.multiplier=value; settingsPending=true; settingsState=1;
+    return 1;
+}
+extern "C" __declspec(dllexport) int DVLSFG_GetMultiplier(int* value) {
+    std::lock_guard<std::mutex> guard(settingsLock);
+    if(value) *value=appliedSettings.multiplier;
+    return settingsPending ? 1 : settingsState;
+}
+extern "C" __declspec(dllexport) int DVLSFG_SetGenerationSettings(int multiplier,int performance,float flowScale) {
+    if(multiplier<2 || multiplier>4 || performance<0 || performance>1 ||
+       !(flowScale>=.25f && flowScale<=1.f) || !Config::activeConf.enable) return 0;
+    std::lock_guard<std::mutex> guard(settingsLock);
+    requestedSettings={multiplier,performance!=0,flowScale}; settingsPending=true; settingsState=1; return 1;
+}
+extern "C" __declspec(dllexport) int DVLSFG_GetGenerationSettings(int* multiplier,int* performance,float* flowScale) {
+    std::lock_guard<std::mutex> guard(settingsLock);
+    if(multiplier) *multiplier=appliedSettings.multiplier;
+    if(performance) *performance=appliedSettings.performance ? 1 : 0;
+    if(flowScale) *flowScale=appliedSettings.flowScale;
+    return settingsPending ? 1 : settingsState;
+}
 extern "C" __declspec(dllexport) void DVLSFG_SetInputFrameLimit(int value) { gameFrameLimit=value>0 ? value : 0; }
 extern "C" __declspec(dllexport) void DVLSFG_GetMetrics(float* input,float* submitted,float* mean,float* peak) {
     std::lock_guard<std::mutex> guard(metricsLock);

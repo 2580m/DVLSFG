@@ -65,6 +65,13 @@ foreach ($file in Get-ChildItem $port -Recurse -File | Where-Object Extension -i
         $s = $s.Replace('this->mipmaps.Dispatch(data.cmdBuffer1, this->frameIdx);', 'DVLSFG::externalBarrier(data.cmdBuffer1.handle(), inImg_0.handle(), vk.device.getComputeFamilyIdx(), true);' + "`n    DVLSFG::externalBarrier(data.cmdBuffer1.handle(), inImg_1.handle(), vk.device.getComputeFamilyIdx(), true);`n    this->mipmaps.Dispatch(data.cmdBuffer1, this->frameIdx);")
         $s = $s.Replace('this->generate.Dispatch(buf2, this->frameIdx, pass);', 'DVLSFG::externalBarrier(buf2.handle(), generate.sharedOutputs().at(pass).handle(), vk.device.getComputeFamilyIdx(), true);' + "`n        this->generate.Dispatch(buf2, this->frameIdx, pass);`n        DVLSFG::externalBarrier(buf2.handle(), generate.sharedOutputs().at(pass).handle(), vk.device.getComputeFamilyIdx(), false);`n        if (pass + 1 == vk.generationCount) {`n            DVLSFG::externalBarrier(buf2.handle(), inImg_0.handle(), vk.device.getComputeFamilyIdx(), false);`n            DVLSFG::externalBarrier(buf2.handle(), inImg_1.handle(), vk.device.getComputeFamilyIdx(), false);`n        }")
     }
+    if ($file.FullName -match 'framegen\\v3\.1p?_src\\lsfg.cpp$') {
+        # Reset a partially initialized backend too, so failed live rebuilds can recover.
+        $s = [regex]::Replace($s,'void (LSFG_3_1P?)::finalize\(\) \{[\s\S]*?\n\}', {
+            param($m)
+            'void ' + $m.Groups[1].Value + "::finalize() {`n    if (device.has_value()) vkDeviceWaitIdle(device->device.handle());`n    contexts.clear();`n    device.reset();`n    instance.reset();`n}"
+        })
+    }
     # Vulkan objects must be destroyed before the memory backing them; shared_ptr also owns its wrapper.
     if ($file.FullName -match '(framegen\\src\\core|src\\mini)\\.*\.cpp$') {
         $s = [regex]::Replace($s,'((?:vk|Layer::ovk)\w+\([^;]+;)(\s*)(\}\s*\);)', '$1$2delete ' + '$' + 'PLACEHOLDER;$2$3')
@@ -105,6 +112,8 @@ std::string Utils::getConfigFile() {
     }
     if ($file.FullName -match 'src\\hooks.cpp$') {
         $s = '#include "present_chain.hpp"' + "`n" + $s
+        $s = '#include <mutex>' + "`n" + $s
+        $s = $s.Replace('namespace {', 'namespace {' + "`n    std::recursive_mutex framegenLock;")
         # Never cap generated output to refresh rate. If IMMEDIATE is unavailable,
         # leave the application's swapchain alone and report frame generation unavailable.
         $s = $s.Replace('        // increase amount of images in swapchain', @'
@@ -149,6 +158,66 @@ if (pPresentInfo->swapchainCount != 1) return Layer::ovkQueuePresentKHR(queue, p
         $end = $s.IndexOf('        // NOLINTEND | present the next frame', $begin)
         $s = $s.Remove($begin,$end-$begin)
         $s = $s.Replace('return res;' + "`n    }`n`n    /// Erase the swapchain", 'if (pPresentInfo->pResults) pPresentInfo->pResults[0] = res;' + "`n        return res;`n    }`n`n    /// Erase the swapchain")
+        # All native changes occur under the hook lock, never on Unity's settings thread.
+        $s = $s.Replace('        if (framegenOwner &&', '        std::lock_guard<std::recursive_mutex> guard(framegenLock);' + "`n        if (framegenOwner &&")
+        $s = $s.Replace('        if (pPresentInfo->swapchainCount != 1)', '        std::lock_guard<std::recursive_mutex> guard(framegenLock);' + "`n        if (pPresentInfo->swapchainCount != 1)")
+        $s = $s.Replace('        swapchains.erase(swapchain);', '        std::lock_guard<std::recursive_mutex> guard(framegenLock);' + "`n        swapchainRecipes.erase(swapchain);`n        swapchains.erase(swapchain);")
+        $s = $s.Replace('        if (framegenOwner == device)', '        std::lock_guard<std::recursive_mutex> guard(framegenLock);' + "`n        if (framegenOwner == device)")
+        $s = $s.Replace('        deviceToInfo.emplace(*pDevice', '        std::lock_guard<std::recursive_mutex> guard(framegenLock);' + "`n        deviceToInfo.emplace(*pDevice")
+        $s = $s.Replace('            swapchains.erase(pCreateInfo->oldSwapchain);', '            swapchainRecipes.erase(pCreateInfo->oldSwapchain);' + "`n            swapchainToPresent.erase(pCreateInfo->oldSwapchain);`n            swapchains.erase(pCreateInfo->oldSwapchain);")
+        $s = $s.Replace('            framegenOwner = device;', '            swapchainRecipes[*pSwapchain] = { device, pCreateInfo->imageExtent, swapchainImages, pCreateInfo->imageFormat };' + "`n            framegenOwner = device;")
+        $s = $s.Replace('    std::unordered_map<VkSwapchainKHR, VkPresentModeKHR> swapchainToPresent;', @'
+    std::unordered_map<VkSwapchainKHR, VkPresentModeKHR> swapchainToPresent;
+    struct SwapchainRecipe { VkDevice device; VkExtent2D extent; std::vector<VkImage> images; VkFormat format; };
+    std::unordered_map<VkSwapchainKHR, SwapchainRecipe> swapchainRecipes;
+
+    bool applyGenerationRequest() noexcept {
+        DVLSFG::GenerationSettings next{};
+        if (!DVLSFG::takeGenerationRequest(next)) return true;
+        auto& conf=Config::activeConf;
+        const DVLSFG::GenerationSettings previous{static_cast<int>(conf.multiplier),conf.performance,conf.flowScale};
+        if (next.multiplier==previous.multiplier && next.performance==previous.performance && next.flowScale==previous.flowScale && !swapchains.empty()) {
+            DVLSFG::generationApplied(previous,true); return true;
+        }
+        auto rebuild = [](const DVLSFG::GenerationSettings& settings) {
+            // Context destruction waits both the game and private compute devices idle.
+            swapchains.clear();
+            DVLSFG::finalizeBackend();
+            Config::activeConf.multiplier = settings.multiplier;
+            Config::activeConf.performance = settings.performance;
+            Config::activeConf.flowScale = settings.flowScale;
+            for (const auto& [handle, recipe] : swapchainRecipes) {
+                auto info = deviceToInfo.find(recipe.device);
+                if (info == deviceToInfo.end()) throw std::runtime_error("Multiplier rebuild device missing");
+                swapchains.emplace(handle, LsContext(info->second, handle, recipe.extent, recipe.images, recipe.format));
+            }
+        };
+        DVLSFG::status("Rebuilding frame generation: " + std::to_string(next.multiplier) + "x, " +
+            (next.performance ? "performance" : "standard") + ", flow=" + std::to_string(next.flowScale));
+        try {
+            rebuild(next);
+            DVLSFG::generationApplied(next,true);
+            DVLSFG::status("Live generation settings applied; history reset");
+            return true;
+        } catch (const std::exception& e) {
+            const std::string failure=e.what();
+            try { rebuild(previous); }
+            catch (const std::exception& rollback) {
+                swapchains.clear(); DVLSFG::finalizeBackend();
+                Config::activeConf.multiplier=previous.multiplier;
+                Config::activeConf.performance=previous.performance;
+                Config::activeConf.flowScale=previous.flowScale;
+                DVLSFG::status("Multiplier rebuild and recovery failed: " + failure + "; " + rollback.what());
+                DVLSFG::generationApplied(previous,false);
+                return false;
+            }
+            DVLSFG::generationApplied(previous,false);
+            DVLSFG::status("Generation change failed; restored previous settings: " + failure);
+            return true;
+        }
+    }
+'@)
+        $s = $s.Replace('        // find swapchain context', '        if (!applyGenerationRequest()) return Layer::ovkQueuePresentKHR(queue, pPresentInfo);' + "`n        // find swapchain context")
         # Constants link outside this TU for the DLL probe.
     }
     if ($file.FullName -match 'src\\extract\\extract.cpp$') {

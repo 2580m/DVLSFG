@@ -7,6 +7,9 @@ param(
     [switch]$Disabled,
     [switch]$WithOverlays,
     [switch]$Toggle,
+    [switch]$Live,
+    [switch]$LiveSettings,
+    [switch]$RecoverySettings,
     [switch]$Recreate,
     [switch]$Metadata,
     [switch]$Capture,
@@ -54,6 +57,9 @@ if($ApiDump) {
 }
 $hostArgs=if($Toggle){'--toggle'}elseif($Recreate){'--recreate'}elseif($Metadata){'--metadata'}elseif($Capture){'--capture'}elseif($Secondary){'--secondary'}else{'--normal'}
 if($ResizePresent){$hostArgs='--resize-present'}
+if($Live) { $hostArgs='--live'; if($ResizePresent) { $hostArgs+=' --resize-present' } }
+if($LiveSettings) { $hostArgs='--live-settings'; if($ResizePresent) { $hostArgs+=' --resize-present' } }
+if($RecoverySettings) { $hostArgs='--recovery-settings' }
 $hostArgs+=" --frames=$Frames --rate=$InputRate"
 if($Visible) { $hostArgs+=' --visible' }
 if($DisplayProof) { $hostArgs+=' --display-proof' }
@@ -66,13 +72,31 @@ Write-Output "Exit=$($process.ExitCode); artifacts=$run"
 if($process.ExitCode -ne 0) { throw 'Vulkan smoke failed' }
 $expectedReal=if($Toggle){$Frames-2}else{$Frames}
 $expected=$expectedReal*($Multiplier-1)
+if($Live) { $expectedReal=11; $expected=20 }
+if($LiveSettings) { $expectedReal=10; $expected=15 }
 if(-not $Disabled -and -not $ResizePresent -and -not ((Get-Content "$run/stdout.log" -Raw) -match "real=$expectedReal generated=$expected\b")) { throw 'Unexpected generated frame count' }
 if($Disabled -and -not ((Get-Content "$run/stdout.log" -Raw) -match 'real=0 generated=0\b')) { throw 'Disabled path generated frames' }
+if($Live -or $LiveSettings -or $RecoverySettings) {
+    $source=Get-ChildItem "$run/captures" -Filter '*-input.bmp' | Select-Object -First 1
+    $synth=Get-ChildItem "$run/captures" -Filter '*-generated.bmp' | Select-Object -First 1
+    $values=@()
+    foreach($file in @($source,$synth)) {
+        if(-not $file) { throw 'Live-switch framebuffer capture absent' }
+        $data=[IO.File]::ReadAllBytes($file.FullName)
+        $offset=[BitConverter]::ToInt32($data,10); $width=[BitConverter]::ToInt32($data,18); $height=[Math]::Abs([BitConverter]::ToInt32($data,22))
+        $center=$offset+(([int]($height/2)*$width+[int]($width/2))*4)
+        $values+=[int]$data[$center+2]
+    }
+    $current=if($LiveSettings -or $RecoverySettings){234}else{212}; $previous=if($LiveSettings -or $RecoverySettings){212}else{191}
+    if($values[0] -ne $current -or $values[1] -le $previous -or $values[1] -ge $current) { throw "Live-switch interpolation failed: $values" }
+    Write-Output "Live pixel proof: previous=$previous, generated=$($values[1]), current=$($values[0])."
+}
 if($Validation -and (Test-Path "$run/validation.log") -and (Get-Item "$run/validation.log").Length -ne 0) { throw "Vulkan validation messages: $run/validation.log" }
 if($ApiDump) {
     $dumpPath=if(Test-Path "$run/api-dump.log.txt"){"$run/api-dump.log.txt"}elseif(Test-Path "$run/api-dump.log"){"$run/api-dump.log"}else{"$run/stderr.log"}
     $actualPresents=@(Select-String -Path $dumpPath -Pattern 'vkQueuePresentKHR\(').Count
     $expectedPresents=if($Disabled){$Frames}else{$expectedReal*$Multiplier+($Frames-$expectedReal)}
+    if($Live -or $LiveSettings) { $expectedPresents=$Frames+$expected }
     if($actualPresents -ne $expectedPresents){throw "Independent Vulkan trace: expected $expectedPresents presents, got $actualPresents ($dumpPath)"}
     Write-Output "Independent Vulkan trace passed: $actualPresents vkQueuePresentKHR calls."
 }

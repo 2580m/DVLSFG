@@ -1,6 +1,44 @@
-# DV LSFG 0.3.2 (experimental)
+# DV LSFG 0.4.6 (experimental)
 
-Version 0.3.2 fixes resolution-change hangs with frame generation enabled by
+0.4.6 orders the FSR selector left-to-right as Off, Performance, Balanced, Quality,
+Ultra Quality. Persisted mode values and rendering scales remain compatible.
+
+0.4.5 applies generation model and optical-flow quality changes live, alongside
+multiplier changes. Use Graphics Apply or UMM Save on an initialized layer. DLL
+path changes still require restart; rebuilding resources can briefly pause rendering.
+
+0.4.4 moves LSFG status, model/flow restart requirements and FSR rendering/output
+information into native hover descriptions. Read-only status controls and the FSR
+apply-timing notice have been removed.
+
+0.4.3 applies 2x/3x/4x multiplier changes live on an initialized frame-generation
+layer, with a brief pause. Model, flow quality and DLL changes still need restart.
+
+0.4.2 replaces the FSR sharpening selector with a native 0–100% slider, 1% steps
+and a live percentage readout. Native Apply/Discard behavior is retained.
+
+0.4.1 removes the half-second global Unity object scan responsible for periodic
+long frames with FSR enabled. Cameras register on creation; hidden Graphics
+panels no longer perform periodic refreshes. Existing FSR/LSFG settings are retained.
+
+## FSR 1.0 upscaling
+
+Select FSR 1.0 upscaling in the native Graphics menu and Apply. Modes are Off,
+Ultra Quality, Quality, Balanced and Performance, with 0–100% sharpening. Zero
+disables RCAS. FSR settings apply without restarting; start with Quality/Ultra
+Quality and 20% sharpening. FSR is disabled by default and independent of LSFG.
+
+Screen resolution remains output resolution. Scene cameras render into smaller
+targets, then EASU/RCAS upscale after scene AA/postprocessing. Screen Space Overlay
+HUD/menu/hotbar retain output resolution. The existing LSFG path receives the
+completed full-resolution image. FSR itself needs no Lossless.dll and does not
+replace game AA. CPU-limited scenes may gain little; LSFG still runs at output size.
+Support is non-VR, primary display and full-screen scene cameras. Forward/deferred
+rendering have integration paths; rain and all postprocessing combinations still
+need broader scene testing. GPU setup errors restore the original camera target;
+change mode/resolution to retry. Disabling the mod or FSR restores camera ownership.
+
+Version 0.4.2 fixes resolution-change hangs with frame generation enabled by
 recovering outdated swapchains, draining generated work and completing a rejected
 present's application fence when needed. Resolution changes require no extra
 restart; resource reconstruction can briefly pause rendering.
@@ -23,8 +61,8 @@ never overwritten. DVVulkan's d3d11.dll/dxgi.dll stay unchanged and are verified
 against the installed dependency. No global registry, system DLL or Steam launch
 option changes are made.
 
-Supports 2x/3x/4x, standard/performance models and flow scale 0.25–1. Restart after
-changing those settings or the model path. The UMM toggle pauses/resumes an already
+Supports live 2x/3x/4x, standard/performance models and flow scale 0.25–1. Restart after
+changing the DLL path. The UMM toggle pauses/resumes an already
 initialized backend. The UI reports actual native loading and processed input /
 generated frame counts, rather than treating UMM enablement as successful synthesis.
 Processed input counts cover successful frame generation presents, excluding pauses.
@@ -34,15 +72,17 @@ confirmation. A scroll area keeps all original graphics options accessible.
 The fixed preset area is separated using the game's Advanced settings divider style.
 The UMM mod toggle is separate from the saved frame-generation option.
 Both controls and actual frame generation work on ordinary launches. Enabling
-after an off startup or changing model/multiplier/quality requires a normal
-restart; initialized generation can pause/resume immediately. DLL configuration
+after an off startup requires a normal
+restart; initialized generation can pause/resume immediately. Multiplier/model/flow changes
+apply through Graphics Apply or UMM Save, briefly waiting for the GPU and rebuilding
+generation resources with fresh history. DLL configuration
 remains in UMM.
 The UI and metrics.ini report input/submitted rates and presentation processing
 time including synchronization waits. These are not monitor refresh or input
 latency measurements. The comparison capture button writes input/generated BMP
 pairs to captures; use it for diagnostics because readback adds a temporary stall.
 
-Version 0.3.2 uses IMMEDIATE presentation instead of forcing FIFO. Surfaces without
+Version 0.4.2 uses IMMEDIATE presentation instead of forcing FIFO. Surfaces without
 IMMEDIATE support pass through with an unavailable diagnostic. Unity's frame limit
 continues to control input; generation attempts 2/3/4x submissions. High-resolution
 pacing spreads output calls, excluding its own waits from uncapped cost estimation.
