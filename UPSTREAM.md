@@ -92,3 +92,34 @@ depth/motion inputs, temporal history/reset, full-resolution composition and AA
 restoration. The integration currently runs after the game's scene postprocessing.
 Automatic reactive masks and material mip-bias adjustments are not enabled;
 transparent effects and animated foliage need further visual evaluation.
+
+## AMD FSR 3.1 frame generation (Vulkan)
+
+- Repository: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+- Tag: v1.1.3; pinned commit: `54fbaafdc34716811751bea5032700e78f5a0f33`
+- AMD MIT notice: `FIDELITYFX-LICENSE.txt` in the release.
+
+The official Optical Flow and Frame Interpolation components and Vulkan shader
+permutations build from unmodified SDK sources. `DVLSFG.FSRFG.dll` isolates
+Vulkan loader symbols from LSFG's Volk function-pointer symbols. The forced
+`fsr_vk_bridge.hpp` header routes the SDK's physical-device queries through the
+layer's downstream instance dispatch. Promoted KHR device commands fall back to
+their core names, as DXVK need not enable the old extension aliases.
+
+`TemporalSceneCamera` copies raw reversed depth and engine motion vectors into
+owned RFloat/RGFloat single-sample textures before screen UI, at scene render
+resolution. Coordinates are flipped to match display-oriented scene input;
+motion scaling and jitter follow that orientation. Camera cuts, skipped frames,
+FOV/path changes and resolution changes reset interpolation history. Inputs use
+DXVK's public interop ABI; GPU work is recorded on the existing game Vulkan
+device and graphics queue. AMD prepare, optical flow and interpolation run in
+order. The existing presentation layer supplies one generated frame per native
+frame and composes UI independently. It does not use the SDK swapchain proxy,
+LSFG models, or duplicated frames as an interpolation substitute.
+The SDK source is derived into the build directory with its descriptor-pool
+entry count corrected from five to six (the original omitted storage buffers).
+Optional debug-utils labels become no-ops when the game does not enable that
+extension. The scene color is registered once as the interpolation backbuffer,
+as it already excludes UI; registering the same image in both backbuffer slots
+would cause conflicting tracked layouts. Nonfinite/out-of-range engine motion
+vectors are replaced with zero before interop.

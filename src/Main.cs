@@ -41,7 +41,7 @@ namespace DVLSFG {
             catch(Exception e) { entry.Logger.Error("Localization: "+e); return false; }
             try { settings=Settings.Read(config); }
             catch(Exception e) { settings=new Settings(); error=e.Message; entry.Logger.Error(e.Message); }
-            runtimeSettings=new Settings {Enabled=settings.Enabled,DllPath=settings.DllPath,Multiplier=settings.Multiplier,Performance=settings.Performance,FlowScale=settings.FlowScale};
+            runtimeSettings=new Settings {Enabled=settings.Enabled,FrameGenerationTechnology=settings.FrameGenerationTechnology,DllPath=settings.DllPath,Multiplier=settings.Multiplier,Performance=settings.Performance,FlowScale=settings.FlowScale};
             AutoStartup.Initialize(entry);
             entry.OnToggle=Toggle; entry.OnGUI=Draw; entry.OnSaveGUI=Save;
             entry.OnUpdate=UpdateFrameLimit;
@@ -91,7 +91,7 @@ namespace DVLSFG {
         static bool Toggle(UnityModManager.ModEntry entry,bool value) {
             AutoStartup.Request(entry,value);
             if(!value) foreach(var panel in Resources.FindObjectsOfTypeAll<GraphicsSettingsPanel>()) panel.Discard();
-            Bind(); if(loaded) enable(value && settings.Enabled ? 1 : 0); return true;
+            Bind(); if(loaded) enable(value && settings.Enabled && settings.FrameGenerationTechnology==runtimeSettings.FrameGenerationTechnology ? 1 : 0); return true;
         }
         static void Save(UnityModManager.ModEntry entry) { SaveSettings(entry); }
         internal static bool SaveSettings(UnityModManager.ModEntry entry) {
@@ -102,6 +102,12 @@ namespace DVLSFG {
         internal static string GraphicsStatus {
             get {
                 if(!NativeLoaded) return AutoStartup.Error!=null ? L10n.Get("dv_scaling/startup_setup_failed_see_umm") : !settings.Enabled ? L10n.Get("dv_scaling/off") : L10n.Get("dv_scaling/restart_to_enable");
+                if(settings.FrameGenerationTechnology!=runtimeSettings.FrameGenerationTechnology) return L10n.Get("dv_scaling/restart_to_apply");
+                if(runtimeSettings.FrameGenerationTechnology==2) {
+                    var fsrMessage=new StringBuilder(4096); ulong fsrReal,fsrGenerated;
+                    int fsrActive=status(fsrMessage,4096,out fsrReal,out fsrGenerated);
+                    return fsrActive==0 ? L10n.Get("dv_scaling/off_unavailable") : fsrGenerated>0 ? L10n.Get("dv_scaling/generating_frames") : L10n.Get("dv_scaling/no_frames_generated_yet");
+                }
                 if(settings.DllPath!=runtimeSettings.DllPath)
                     return L10n.Get("dv_scaling/restart_to_apply");
                 if(getGenerationSettings!=null) {
@@ -123,7 +129,8 @@ namespace DVLSFG {
         }
         internal static void ApplyEnabled() {
             Bind(); if(!loaded) return;
-            enable(settings.Enabled && modEntry.Active ? 1 : 0);
+            enable(settings.Enabled && modEntry.Active && settings.FrameGenerationTechnology==runtimeSettings.FrameGenerationTechnology ? 1 : 0);
+            if(runtimeSettings.FrameGenerationTechnology==2 || settings.FrameGenerationTechnology!=runtimeSettings.FrameGenerationTechnology) return;
             if(setGenerationSettings!=null && getGenerationSettings!=null) {
                 int change=RefreshGenerationSettings();
                 if(settings.Multiplier!=runtimeSettings.Multiplier || settings.Performance!=runtimeSettings.Performance || settings.FlowScale!=runtimeSettings.FlowScale || change!=0)
@@ -134,7 +141,7 @@ namespace DVLSFG {
             }
         }
         static void Draw(UnityModManager.ModEntry entry) {
-            Bind(); GUILayout.Label("DV LSFG 0.5.1 — " + L10n.Get("dv_scaling/experimental"));
+            Bind(); GUILayout.Label("DV Scaling 0.6.0 — " + L10n.Get("dv_scaling/experimental"));
             GUILayout.Label((settings.FsrTechnology==2 ? "FSR 3.1: " : "FSR 1.0: ")+FsrRuntime.Status);
             GUILayout.Label(L10n.Get("dv_scaling/requires_active_dvvulkan_non_vr_sdr_only"));
             if(loaded) {
@@ -160,7 +167,9 @@ namespace DVLSFG {
                 placeholder.normal.textColor=new Color(.75f,.75f,.75f,.65f);
                 GUI.Label(GUILayoutUtility.GetLastRect(),"C:/<YourLosslessScaling>/Lossless.dll",placeholder);
             }
-            GUILayout.BeginHorizontal(); GUILayout.Label(L10n.Get("dv_scaling/multiplier") + settings.Multiplier + "x");
+            bool previousGuiEnabled=GUI.enabled;
+            GUI.enabled=previousGuiEnabled && settings.FrameGenerationTechnology==1;
+            GUILayout.BeginHorizontal(); GUILayout.Label(L10n.Get("dv_scaling/multiplier") + (settings.FrameGenerationTechnology==2 ? 2 : settings.Multiplier) + "x");
             if(GUILayout.Button("2x")) settings.Multiplier=2;
             if(GUILayout.Button("3x")) settings.Multiplier=3;
             if(GUILayout.Button("4x")) settings.Multiplier=4; GUILayout.EndHorizontal();
@@ -168,6 +177,7 @@ namespace DVLSFG {
             GUILayout.Label(L10n.Get("dv_scaling/flow_scale") + settings.FlowScale.ToString("0.00"));
             settings.FlowScale=GUILayout.HorizontalSlider(settings.FlowScale,.25f,1f);
             GUILayout.Label(L10n.Get("dv_scaling/multiplier_model_and_flow_quality_apply_on_save_dll_path_cha"));
+            GUI.enabled=previousGuiEnabled;
             if(GUILayout.Button(L10n.Get("dv_scaling/save_settings"))) SaveSettings(entry);
             if(loaded && capture!=null && GUILayout.Button(L10n.Get("dv_scaling/save_input_generated_frame_comparison"))) capture();
             if(GUILayout.Button(L10n.Get("dv_scaling/check_dll_compatibility")) && SaveSettings(entry)) {

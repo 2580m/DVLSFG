@@ -9,6 +9,7 @@ using FidelityFX.FSR3;
 
 namespace DVLSFG {
     internal static class Fsr3Runtime {
+        internal static AssetBundle Bundle {get {if(!bundle) bundle=AssetBundle.LoadFromFile(Path.Combine(Main.modEntry.Path,"dv-scaling-fsr3")); return bundle;}}
         internal static readonly List<Fsr3SceneCamera> Cameras=new List<Fsr3SceneCamera>();
         internal static Fsr3UpscalerShaders Shaders;
         static AssetBundle bundle;
@@ -26,7 +27,7 @@ namespace DVLSFG {
             }
             if(Shaders==null && failure==null) try {
                 if(!SystemInfo.supportsComputeShaders || !SystemInfo.usesReversedZBuffer) throw new NotSupportedException("FSR3 requires D3D11 compute and reversed depth");
-                bundle=AssetBundle.LoadFromFile(Path.Combine(Main.modEntry.Path,"dv-scaling-fsr3"));
+                bundle=Bundle;
                 if(!bundle) throw new InvalidDataException("FSR3 shader bundle could not be loaded");
                 Shaders=new Fsr3UpscalerShaders {
                     prepareInputsPass=Load("prepare_inputs"),lumaPyramidPass=Load("luma_pyramid"),
@@ -63,6 +64,7 @@ namespace DVLSFG {
         bool previousMsaa,reset=true,owned,stateCaptured;
         int mode,width,height;
         Vector2 jitter;
+        internal Vector2 Jitter {get {return jitter;}}
         Vector3 lastPosition;
         Quaternion lastRotation;
         float lastFov;

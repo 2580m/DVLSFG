@@ -8,6 +8,7 @@ void initialize();
 void status(const std::string& message);
 void countFrame(unsigned generated);
 bool isEnabled();
+int generationTechnology();
 unsigned long long epoch();
 void finalizeBackend();
 bool takeCapture();

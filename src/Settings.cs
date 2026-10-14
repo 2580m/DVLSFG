@@ -5,6 +5,7 @@ using System.Text;
 namespace DVLSFG {
     public sealed class Settings {
         public bool Enabled;
+        public int FrameGenerationTechnology=1;
         public string DllPath = "";
         public int Multiplier = 2;
         public bool Performance;
@@ -22,6 +23,7 @@ namespace DVLSFG {
                 string key = line.Substring(0, eq), value = line.Substring(eq + 1);
                 switch(key) {
                     case "Enabled": s.Enabled = value == "1"; break;
+                    case "FrameGenerationTechnology": s.FrameGenerationTechnology=int.Parse(value,CultureInfo.InvariantCulture); break;
                     case "DllPath": s.DllPath = value; break;
                     case "Multiplier": s.Multiplier = int.Parse(value, CultureInfo.InvariantCulture); break;
                     case "Performance": s.Performance = value == "1"; break;
@@ -37,6 +39,7 @@ namespace DVLSFG {
             s.Validate(); return s;
         }
         public void Validate() {
+            if(FrameGenerationTechnology<1 || FrameGenerationTechnology>2) throw new InvalidDataException("Frame generation technology must be 1..2");
             DllPath = (DllPath ?? "").Trim().Trim('"');
             if (DllPath.IndexOfAny(new char[] {'\r','\n','\0'}) >= 0) throw new InvalidDataException("Invalid DLL path");
             if (Multiplier < 2 || Multiplier > 4) throw new InvalidDataException("Multiplier must be 2..4");
@@ -49,6 +52,7 @@ namespace DVLSFG {
         public void Save(string path) {
             Validate();
             string text = "Enabled=" + (Enabled ? "1" : "0") + "\nDllPath=" + DllPath
+                + "\nFrameGenerationTechnology=" + FrameGenerationTechnology
                 + "\nMultiplier=" + Multiplier + "\nPerformance=" + (Performance ? "1" : "0")
                 + "\nFlowScale=" + FlowScale.ToString("R",CultureInfo.InvariantCulture)
                 + "\nFsrMode="+FsrMode+"\nFsrTechnology="+(FsrMode==0 ? 0 : FsrTechnology==2 ? 2 : 1)+"\nFsrQuality="+(FsrMode>0 ? FsrMode : FsrQuality)+"\nFsrSharpness="+FsrSharpness.ToString("R",CultureInfo.InvariantCulture)+"\n";

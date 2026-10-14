@@ -25,6 +25,12 @@ for($i=0;$i -lt 20 -and -not (Test-Path $capture);$i++) { Start-Sleep -Milliseco
 $actual=Get-Content $capture -Raw
 if($actual -notmatch 'TestPreservedLayer;VK_LAYER_DVLSFG_frame_generation' -or $actual -notmatch 'C:\\Test preserved path;' -or $actual -notmatch '-force-d3d11') { throw 'Child process environment was not preserved/configured' }
 Remove-Item -LiteralPath $capture
+[IO.File]::WriteAllText($config,$text.Replace("DllPath=$LosslessDll",'DllPath=')+"FrameGenerationTechnology=2`n",[Text.UTF8Encoding]::new($false))
+& "$mod/DVLSFG.Launcher.exe"
+if($LASTEXITCODE) {throw 'FSR frame generation launcher incorrectly required Lossless.dll'}
+for($i=0;$i -lt 20 -and -not (Test-Path $capture);$i++) {Start-Sleep -Milliseconds 100}
+if(-not (Test-Path $capture)) {throw 'FSR frame generation did not launch the fixture'}
+Remove-Item -LiteralPath $capture
 [IO.File]::WriteAllText($config,$text.Replace('Enabled=1','Enabled=0'),[Text.UTF8Encoding]::new($false))
 & "$mod/DVLSFG.Launcher.exe"
 if($LASTEXITCODE -eq 0 -or (Test-Path $capture)) { throw 'Disabled launch was not rejected' }

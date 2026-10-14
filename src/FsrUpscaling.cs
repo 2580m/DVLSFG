@@ -35,6 +35,7 @@ namespace DVLSFG {
             if(camera && !camera.GetComponent<FsrSceneCamera>()) camera.gameObject.AddComponent<FsrSceneCamera>();
             if(camera && !camera.GetComponent<Fsr3SceneCamera>()) camera.gameObject.AddComponent<Fsr3SceneCamera>().enabled=false;
             if(camera && !camera.GetComponent<SceneUiSceneCamera>()) camera.gameObject.AddComponent<SceneUiSceneCamera>().enabled=SceneUiRuntime.Active && !Requested;
+            if(camera && !camera.GetComponent<TemporalSceneCamera>()) camera.gameObject.AddComponent<TemporalSceneCamera>().enabled=SceneUiRuntime.Active && Main.settings.FrameGenerationTechnology==2;
         }
         internal static void Tick() {
             Fsr3Runtime.Tick();

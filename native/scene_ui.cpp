@@ -28,6 +28,7 @@ struct __declspec(uuid("e2ef5fa5-dc21-4af7-90c4-f67ef6a09323")) InteropDevice : 
 namespace {
 std::mutex frameMutex;
 std::shared_ptr<const DVLSFG::SceneUiFrame> latest;
+std::shared_ptr<const DVLSFG::SceneUiFrame> temporal;
 // Production starts before UMM loads: loading/menu UI must never be fed to LSFG.
 // The standalone Vulkan regression host opts into the legacy complete-frame path.
 std::atomic<bool> requested{GetEnvironmentVariableW(L"DVLSFG_TEST_HOST",nullptr,0)==0};
@@ -45,20 +46,23 @@ struct Job {
     // holds its queue lock. Defer COM Release calls to the Unity render callback.
     std::shared_ptr<Resources> resources{new Resources,[](Resources* value) {std::lock_guard guard(retiredMutex); retired.push_back(value);}};
     std::atomic<int> status{0};
+    std::mutex metadataMutex;
+    std::array<float,7> metadata{};
 };
 void __stdcall event(int kind,void* data) {
     drainRetired();
-    if(kind==3) {std::lock_guard guard(frameMutex); latest.reset(); return;}
+    if(kind==3) {std::lock_guard guard(frameMutex); latest.reset(); temporal.reset(); return;}
     auto job=static_cast<Job*>(data); if(!job) return;
-    if(kind==2) {
+    if(kind==2 || kind==5) {
         {std::lock_guard guard(frameMutex); if(latest && latest->resources==job->resources) latest.reset();}
+        {std::lock_guard guard(frameMutex); if(temporal && temporal->resources==job->resources) temporal.reset();}
         delete job; drainRetired(); return;
     }
-    if(kind!=1 || !requested || job->status<0) return;
+    if((kind!=1 && kind!=4) || !requested || job->status<0) return;
     try {
         auto& r=*job->resources;
         if(!r.device) {
-            for(size_t i=0;i<3;++i) if(FAILED(r.textures[i].As(&r.surfaces[i]))) throw std::runtime_error("DXVK surface interop unavailable");
+            for(size_t i=0;i<(kind==4 ? 2 : 3);++i) if(FAILED(r.textures[i].As(&r.surfaces[i]))) throw std::runtime_error("DXVK surface interop unavailable");
             if(FAILED(r.surfaces[0]->GetDevice(&r.device))) throw std::runtime_error("DXVK device interop unavailable");
         }
         // This callback runs after the UI render commands on Unity's render thread.
@@ -66,21 +70,40 @@ void __stdcall event(int kind,void* data) {
         r.device->FlushRenderingCommands();
         auto frame=std::make_shared<DVLSFG::SceneUiFrame>();
         r.device->GetVulkanHandles(nullptr,nullptr,&frame->device);
-        std::array<DVLSFG::SceneUiFrame::Image*,3> images{&frame->scene,&frame->black,&frame->white};
-        for(size_t i=0;i<3;++i) {
+        std::array<DVLSFG::SceneUiFrame::Image*,3> images=kind==4 ? std::array<DVLSFG::SceneUiFrame::Image*,3>{&frame->depth,&frame->motion,nullptr} : std::array<DVLSFG::SceneUiFrame::Image*,3>{&frame->scene,&frame->black,&frame->white};
+        for(size_t i=0;i<(kind==4 ? 2 : 3);++i) {
             VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
             if(FAILED(r.surfaces[i]->GetVulkanImageInfo(&images[i]->image,&images[i]->layout,&info)) || info.samples!=VK_SAMPLE_COUNT_1_BIT || !(info.usage&VK_IMAGE_USAGE_SAMPLED_BIT)) throw std::runtime_error("Invalid UI capture texture");
             // DXVK may allocate an R16G16B16A16_UNORM typeless base image for
             // Unity's ARGBHalf target. Sampling that base format interprets the
             // float bit patterns as UNORM. Bind the intended float view instead.
             D3D11_TEXTURE2D_DESC desc{}; r.textures[i]->GetDesc(&desc);
-            if(desc.Format!=DXGI_FORMAT_R16G16B16A16_FLOAT && desc.Format!=DXGI_FORMAT_R16G16B16A16_TYPELESS) throw std::runtime_error("Expected Unity ARGBHalf capture texture");
-            images[i]->format=VK_FORMAT_R16G16B16A16_SFLOAT;
+            if(kind==4) {
+                if(i==0 && desc.Format!=DXGI_FORMAT_R32_FLOAT && desc.Format!=DXGI_FORMAT_R32_TYPELESS) throw std::runtime_error("Expected RFloat depth");
+                if(i==1 && desc.Format!=DXGI_FORMAT_R32G32_FLOAT && desc.Format!=DXGI_FORMAT_R32G32_TYPELESS) throw std::runtime_error("Expected RGFloat motion");
+                images[i]->format=i==0 ? VK_FORMAT_R32_SFLOAT : VK_FORMAT_R32G32_SFLOAT;
+            } else {
+                if(desc.Format!=DXGI_FORMAT_R16G16B16A16_FLOAT && desc.Format!=DXGI_FORMAT_R16G16B16A16_TYPELESS) throw std::runtime_error("Expected Unity ARGBHalf capture texture");
+                images[i]->format=VK_FORMAT_R16G16B16A16_SFLOAT;
+            }
             if(i==0) frame->extent={info.extent.width,info.extent.height};
             else if(info.extent.width!=frame->extent.width || info.extent.height!=frame->extent.height) throw std::runtime_error("UI capture dimensions mismatch");
         }
         frame->resources=job->resources; frame->serial=++serial;
-        {std::lock_guard guard(frameMutex); latest=frame;}
+        if(kind==4) {
+            {std::lock_guard guard(job->metadataMutex); auto& m=job->metadata; frame->jitterX=m[0]; frame->jitterY=m[1]; frame->deltaMs=m[2]; frame->nearPlane=m[3]; frame->farPlane=m[4]; frame->fov=m[5]; frame->reset=m[6]!=0;}
+            frame->renderExtent=frame->extent;
+            std::lock_guard guard(frameMutex); temporal=frame;
+        } else {
+            std::lock_guard guard(frameMutex);
+            if(temporal && temporal->device==frame->device) {
+                frame->depth=temporal->depth; frame->motion=temporal->motion; frame->renderExtent=temporal->renderExtent;
+                frame->jitterX=temporal->jitterX; frame->jitterY=temporal->jitterY; frame->deltaMs=temporal->deltaMs;
+                frame->nearPlane=temporal->nearPlane; frame->farPlane=temporal->farPlane; frame->fov=temporal->fov; frame->reset=temporal->reset;
+                frame->temporalResources=temporal->resources;
+            }
+            latest=frame;
+        }
         job->status=1;
     } catch(const std::exception& e) {job->status=-1; DVLSFG::status(std::string("Scene/UI separation unavailable: ")+e.what());}
 }
@@ -98,6 +121,14 @@ extern "C" __declspec(dllexport) void* __cdecl DVLSFG_CreateSceneUi(void* scene,
 }
 extern "C" __declspec(dllexport) int __cdecl DVLSFG_SceneUiStatus(void* handle,unsigned long long* frames) {
     if(frames) *frames=serial.load(); return handle ? static_cast<Job*>(handle)->status.load() : 0;
+}
+extern "C" __declspec(dllexport) void* __cdecl DVLSFG_CreateTemporal(void* depth,void* motion) {
+    if(!depth || !motion) return nullptr;
+    auto job=new Job; job->resources->textures[0]=static_cast<ID3D11Texture2D*>(depth); job->resources->textures[1]=static_cast<ID3D11Texture2D*>(motion); return job;
+}
+extern "C" __declspec(dllexport) void __cdecl DVLSFG_SetTemporalMetadata(void* handle,float x,float y,float dt,float nearPlane,float farPlane,float fov,int reset) {
+    auto job=static_cast<Job*>(handle); if(!job) return;
+    std::lock_guard guard(job->metadataMutex); job->metadata={x,y,dt,nearPlane,farPlane,fov,float(reset)};
 }
 namespace DVLSFG {
 bool sceneUiRequested() {return requested;}

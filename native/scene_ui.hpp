@@ -8,9 +8,14 @@ struct SceneUiFrame {
     VkDevice device{};
     VkExtent2D extent{};
     Image scene,black,white;
+    Image depth,motion;
+    VkExtent2D renderExtent{};
+    float jitterX{},jitterY{},deltaMs{},nearPlane{},farPlane{},fov{};
+    bool reset{};
     unsigned long long serial{};
     // Retains the Unity D3D resources until all presentation commands complete.
     std::shared_ptr<void> resources;
+    std::shared_ptr<void> temporalResources;
 };
 bool sceneUiRequested();
 std::shared_ptr<const SceneUiFrame> acquireSceneUi(VkDevice device,VkExtent2D extent);

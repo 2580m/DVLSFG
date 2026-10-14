@@ -10,6 +10,8 @@ public static class Fsr3BundleBuilder {
         var version=AssetImporter.GetAtPath("Assets/fsr3-version.txt");
         version.assetBundleName="dv-scaling-fsr3";
         version.SaveAndReimport();
+        var temporal=AssetImporter.GetAtPath("Assets/Shaders/TemporalCapture.shader");
+        temporal.assetBundleName="dv-scaling-fsr3"; temporal.SaveAndReimport();
         foreach(var file in Directory.GetFiles("Assets/Shaders","*fsr3upscaler*.compute")) {
             var path=file.Replace('\\','/');
             var importer=AssetImporter.GetAtPath(path);

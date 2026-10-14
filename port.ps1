@@ -52,12 +52,17 @@ foreach ($file in Get-ChildItem $port -Recurse -File | Where-Object Extension -i
     if ($file.FullName -match 'include\\core\\image.hpp$|include\\mini\\image.hpp$') {
         $s = $s.Replace('std::shared_ptr<VkImage> image;' + "`n        std::shared_ptr<VkDeviceMemory> memory;",'std::shared_ptr<VkDeviceMemory> memory;' + "`n        std::shared_ptr<VkImage> image;")
     }
+    if ($file.FullName -match 'src\\layer.cpp$') {
+        $s = '#include "fsr_framegen.hpp"' + "`n" + $s
+        $s = $s.Replace('std::cerr << "lsfg-vk: Vulkan instance layer initialized successfully.', 'DVLSFG::FsrFrameGeneration::configureInstance(*pInstance, next_vkGetInstanceProcAddr);' + "`n            std::cerr << " + '"lsfg-vk: Vulkan instance layer initialized successfully.')
+    }
     if ($file.FullName -match 'include\\context.hpp$' -and $file.FullName -notmatch 'framegen') {
         $s = $s.Replace('VkExtent2D extent, const std::vector<VkImage>& swapchainImages);','VkExtent2D extent, const std::vector<VkImage>& swapchainImages, VkFormat swapchainFormat);')
         $s = $s.Replace('~LsContext() = default;','~LsContext() noexcept;')
         $s = $s.Replace('    VkSwapchainKHR swapchain;', '    VkDevice storedDevice{};' + "`n    unsigned long long lastEpoch{};`n    std::chrono::steady_clock::time_point previousInput{}, previousOutput{};`n    double inputPeriodSeconds{}, previousPacingSeconds{};`n    int previousLimit{};`n    VkFormat swapchainFormat{};`n    VkSwapchainKHR swapchain;")
         $s = $s.Replace('    VkDevice storedDevice{};', '    unsigned long long lastSceneSerial{}; std::shared_ptr<DVLSFG::UiComposite> uiComposite;' + "`n    VkDevice storedDevice{};")
-        $s = '#include <chrono>' + "`n" + '#include "scene_ui.hpp"' + "`n" + $s
+        $s = $s.Replace('    VkDevice storedDevice{};', '    std::shared_ptr<DVLSFG::FsrFrameGeneration> fsrFrameGeneration;' + "`n    VkDevice storedDevice{};")
+        $s = '#include <chrono>' + "`n" + '#include "scene_ui.hpp"' + "`n" + '#include "fsr_framegen.hpp"' + "`n" + $s
     }
     if ($file.FullName -match 'framegen\\v3\.1p?_include\\.*\\shaders\\generate.hpp$') {
         $s = $s.Replace('    private:', '        const std::vector<Core::Image>& sharedOutputs() const { return outImgs; }' + "`n    private:")

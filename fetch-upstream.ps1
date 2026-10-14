@@ -19,3 +19,12 @@ if(-not (Test-Path $fsr3)) {
     if($LASTEXITCODE) {throw 'FSR3 checkout failed'}
 }
 if((git -C $fsr3 rev-parse HEAD) -ne $fsr3Revision) {throw 'Unexpected FSR3Unity revision'}
+$fidelity=Join-Path $PSScriptRoot 'vendor/FidelityFX-SDK'
+$fidelityRevision='54fbaafdc34716811751bea5032700e78f5a0f33'
+if(-not (Test-Path $fidelity)) {
+    git clone --depth 1 --branch v1.1.3 --filter=blob:none --sparse https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git $fidelity
+    if($LASTEXITCODE) {throw 'FidelityFX clone failed'}
+    git -C $fidelity sparse-checkout set sdk docs
+    if($LASTEXITCODE) {throw 'FidelityFX checkout failed'}
+}
+if((git -C $fidelity rev-parse HEAD) -ne $fidelityRevision) {throw 'Unexpected FidelityFX SDK revision'}

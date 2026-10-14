@@ -33,7 +33,7 @@ namespace DVLSFG {
                         }
                     }
                     if(!s.Enabled) throw new Exception("Enable DVLSFG in UMM and save settings first.");
-                    if(!Check(mod,s.DllPath)) throw new Exception("Lossless.dll is incompatible. See probe.log.");
+                    if(s.FrameGenerationTechnology==1 && !Check(mod,s.DllPath)) throw new Exception("Lossless.dll is incompatible. See probe.log.");
                     foreach(string name in new[]{"d3d11.dll","dxgi.dll"}) {
                         string expected=Path.Combine(root,"Mods","DVVulkan","dxvk",name), deployed=Path.Combine(root,name);
                         if(!File.Exists(expected) || !File.Exists(deployed) || Hash(expected)!=Hash(deployed)) throw new Exception("Enable DVVulkan and restart first: missing or mismatched " + name);

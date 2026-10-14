@@ -4,7 +4,7 @@
 
 **让 Derail Valley 的原生图形设置拥有帧生成与超分辨率。**
 
-<a href="package/Info.json"><img src="https://img.shields.io/badge/version-0.5.1-6366f1?style=flat-square" alt="Version 0.5.1"></a>
+<a href="package/Info.json"><img src="https://img.shields.io/badge/version-0.6.0-6366f1?style=flat-square" alt="Version 0.6.0"></a>
 <img src="https://img.shields.io/badge/status-Beta-f59e0b?style=flat-square" alt="Beta">
 <img src="https://img.shields.io/badge/platform-Windows_x64-0078d4?style=flat-square" alt="Windows x64">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" alt="MIT license"></a>
@@ -22,6 +22,7 @@ DV Scaling 是独立的 Unity Mod Manager 模组。所有设置集成在游戏�
 | 功能 | 支持内容 |
 | --- | --- |
 | **LSFG 3.1 帧生成** | 2× / 3× / 4× 倍率，标准与性能模型，光流质量调整 |
+| **FSR 3.1 帧生成** | 固定 2×，游戏深度与运动矢量配合 AMD 光流；无需 Lossless.dll |
 | **FSR 1.0 超分辨率** | 空间重建，独立质量档位与 0%–100% 锐化 |
 | **FSR 3.1 超分辨率** | 深度、运动矢量、投影抖动与历史帧驱动的时域重建 |
 | **独立 UI 合成** | 屏幕叠加 UI 不参与插帧，原生帧与生成帧保留独立 UI MSAA |
@@ -31,7 +32,7 @@ DV Scaling 是独立的 Unity Mod Manager 模组。所有设置集成在游戏�
 超分辨率质量从左到右为：**超级性能 → 性能 → 平衡 → 质量 → 超级质量**。屏幕分辨率保持为输出分辨率，场景根据质量档位降低渲染分辨率。
 
 > [!NOTE]
-> 当前支持 **Windows x64、非 VR、SDR**。FSR 3.1 替代场景抗锯齿，UI 保留独立抗锯齿。UI 按原生帧率更新；打开 UMM 窗口或遇到无法分离的相机空间 UI 时，保留普通呈现。
+> 当前支持 **Windows x64、非 VR、SDR**。FSR 3.1 超分辨率替代场景抗锯齿，UI 保留独立抗锯齿。UI 按原生帧率更新；打开 UMM 窗口或遇到无法分离的相机空间 UI 时，保留普通呈现。
 
 ## 📦 安装
 
@@ -42,18 +43,18 @@ DV Scaling 是独立的 Unity Mod Manager 模组。所有设置集成在游戏�
 | **Unity Mod Manager** | 安装与管理模组，最低版本 0.27.3 |
 | **DVVulkan** | 部署 DXVK，提供 D3D11 → Vulkan 渲染路径 |
 | **DV Language Helper**（`DVLangHelper`） | 加载本地翻译，跟随游戏语言切换 |
-| **Lossless Scaling 的 `Lossless.dll`** | 提供 LSFG 模型资源；仅帧生成需要，FSR 本身不需要 |
+| **Lossless Scaling 的 `Lossless.dll`** | 提供 LSFG 模型资源；仅 LSFG 帧生成需要；FSR 超分辨率和帧生成均不需要 |
 
 ### 开始使用
 
 1. 退出游戏，安装并启用前置依赖，确保 DVVulkan 已完成 DXVK 部署。
-2. 将 `dv-scaling-0.5.1.zip` 拖入 UMM 安装。安装包可使用发布版本，或按下方开发说明自行构建。
-3. 启动游戏，在 UMM 中启用 **DV Scaling (Beta)**。使用帧生成时，填写自己的 `Lossless.dll` 完整路径并保存，执行“检查 DLL 兼容性”。
+2. 将 `dv-scaling-0.6.0.zip` 拖入 UMM 安装。安装包可使用发布版本，或按下方开发说明自行构建。
+3. 启动游戏，在 UMM 中启用 **DV Scaling (Beta)**。使用 LSFG 帧生成时，填写自己的 `Lossless.dll` 完整路径并保存，执行“检查 DLL 兼容性”。
 4. 在 **设置 → 图形质量**选择帧生成或超分辨率技术，调整质量与锐化，点击**应用**。
 5. 首次启用帧生成后，正常退出游戏，等待自动部署完成，再从 Steam 或原有快捷方式启动。
 
 > [!IMPORTANT]
-> 模组包不包含 `Lossless.dll`、提取出的 LSFG 着色器或个人配置。首次启用帧生成以及修改 DLL 路径需要重启；完成首次部署后，无需专用启动脚本。
+> 模组包不包含 `Lossless.dll`、提取出的 LSFG 着色器或个人配置。首次启用帧生成、切换帧生成技术以及修改 DLL 路径需要重启；完成首次部署后，无需专用启动脚本。
 
 <details>
 <summary>从旧目录升级</summary>
@@ -68,15 +69,15 @@ UMM 内部 ID 仍为 `DVLSFG`，用于保留启用状态和依赖关系。
 
 | 设置项 | 调整内容 | 生效方式 |
 | --- | --- | --- |
-| 帧生成 | 关闭 / LSFG 3.1 | 首次加载图形层需要重启 |
-| 帧生成倍率 | 2× / 3× / 4× | 图形层已加载时，应用后实时生效 |
-| 帧生成模型 | 标准 / 性能 | 图形层已加载时，应用后实时生效 |
-| 光流质量 | 25% / 50% / 75% / 100% | 图形层已加载时，应用后实时生效 |
+| 帧生成 | 关闭 / LSFG 3.1 / FSR 3.1 | 首次加载及切换技术需要重启；同一技术可即时开关 |
+| 帧生成倍率 | LSFG：2× / 3× / 4×；FSR：固定 2× | LSFG 应用后实时生效 |
+| 帧生成模型 | LSFG：标准 / 性能 | LSFG 应用后实时生效 |
+| 光流质量 | LSFG：25% / 50% / 75% / 100% | LSFG 应用后实时生效 |
 | 超分辨率技术 | 关闭 / FSR 1.0 / FSR 3.1 | 应用后生效 |
 | 超分辨率质量 | 五档质量 | 应用后生效 |
 | 锐化强度 | 0%–100% | 应用后生效 |
 
-关闭技术时，其从属设置会立即置灰，重新开启保留原值。选择 FSR 3.1 时，原生场景抗锯齿选项不可交互；切回 FSR 1.0 或关闭超分辨率后恢复。
+关闭技术时，其从属设置会立即置灰，重新开启保留原值。选择 FSR 3.1 超分辨率时，原生场景抗锯齿选项不可交互；切回 FSR 1.0 或关闭超分辨率后恢复。
 
 从 **质量档位、20% 锐化、2× 帧生成**开始尝试，再按画质和 GPU 负载调整。超分辨率与帧生成可以分别启用，实际表现受场景、GPU 和显示环境影响。
 
@@ -101,7 +102,7 @@ UMM 内部 ID 仍为 `DVLSFG`，用于保留启用状态和依赖关系。
 
 将游戏路径替换为自己的安装位置；Vulkan SDK 路径不同时，可传入 `-VulkanSdk`。
 
-输出目录为 `dist/dv-scaling`，当前安装包为 `dist/dv-scaling-0.5.1.zip`。安装后的模组不需要编辑器或着色器编译器。
+输出目录为 `dist/dv-scaling`，当前安装包为 `dist/dv-scaling-0.6.0.zip`。安装后的模组不需要编辑器或着色器编译器。
 
 `port.ps1` 从固定版本的上游生成 Windows 移植代码，输出到 `build/port`。修改移植规则或原生源码，不要直接编辑生成文件。迁移项目目录后，需要重新生成原生 CMake 构建目录，避免沿用旧的绝对路径缓存。
 

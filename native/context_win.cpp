@@ -76,7 +76,7 @@ void waitUntil(std::chrono::steady_clock::time_point deadline) {
 LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent2D size,const std::vector<VkImage>& images,VkFormat sourceFormat)
     : swapchain(chain),swapchainImages(images),extent(size),storedDevice(info.device),swapchainFormat(sourceFormat) {
     const auto& conf=Config::activeConf;
-    if(size.width<128 || size.height<128 || size.width*conf.flowScale<64 || size.height*conf.flowScale<64)
+    if(size.width<128 || size.height<128 || (DVLSFG::generationTechnology()==1 && (size.width*conf.flowScale<64 || size.height*conf.flowScale<64)))
         throw std::runtime_error("Swapchain or flow resolution too small for LSFG pyramid");
     const VkFormat format=VK_FORMAT_R16G16B16A16_SFLOAT;
     std::array<HANDLE,2> inputs{};
@@ -84,6 +84,9 @@ LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent
     frame_1=Mini::Image(info.device,info.physicalDevice,size,format,VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&inputs[1]);
     std::vector<HANDLE> outputs(conf.multiplier-1);
     for(size_t i=0;i<outputs.size();++i) out_n.emplace_back(info.device,info.physicalDevice,size,format,VK_IMAGE_USAGE_TRANSFER_SRC_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&outputs[i]);
+    if(DVLSFG::generationTechnology()==2) {
+        fsrFrameGeneration=std::make_shared<DVLSFG::FsrFrameGeneration>(info.device,info.physicalDevice,size,sourceFormat!=VK_FORMAT_B8G8R8A8_SRGB && sourceFormat!=VK_FORMAT_R8G8B8A8_SRGB,Layer::ovkGetDeviceProcAddr,DVLSFG::status);
+    } else {
     auto init=conf.performance ? LSFG_3_1P::initialize : LSFG_3_1::initialize;
     auto create=conf.performance ? LSFG_3_1P::createContext : LSFG_3_1::createContext;
     auto destroy=conf.performance ? LSFG_3_1P::deleteContext : LSFG_3_1::deleteContext;
@@ -94,22 +97,25 @@ LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent
         lsfgCtxId=std::shared_ptr<int32_t>(new int32_t(create(inputs[0],inputs[1],outputs,size,format)),
             [destroy](int32_t* id) { try { destroy(*id); } catch(...) {} delete id; });
     }
+    }
     cmdPool=Mini::CommandPool(info.device,info.queue.first);
     DVLSFG::status("Swapchain ready: " + std::to_string(size.width) + "x" + std::to_string(size.height));
 }
 LsContext::~LsContext() noexcept {
     try {
-        if(!lsfgCtxId) return;
+        if(!lsfgCtxId && !fsrFrameGeneration) return;
         DVLSFG::status("Destroy context: waiting for game device");
         if(storedDevice) waitIdle(storedDevice);
         DVLSFG::status("Destroy context: releasing backend");
         lsfgCtxId.reset();
+        fsrFrameGeneration.reset();
         DVLSFG::status("Destroy context: backend released");
     } catch(...) {}
 }
 VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQueue queue,const std::vector<VkSemaphore>& waits,uint32_t index) {
     auto ui=DVLSFG::acquireSceneUi(info.device,extent);
-    if(DVLSFG::sceneUiRequested() && (!ui || ui->serial==lastSceneSerial)) {
+    const bool fsr=bool(fsrFrameGeneration);
+    if((DVLSFG::sceneUiRequested() && (!ui || ui->serial==lastSceneSerial)) || (fsr && (!ui || !ui->depth.image || !ui->motion.image))) {
         // Menu/loading frames retain ordinary presentation, never UI interpolation.
         VkPresentInfoKHR actual{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR}; actual.pNext=pNext;
         actual.waitSemaphoreCount=static_cast<uint32_t>(waits.size()); actual.pWaitSemaphores=waits.data();
@@ -180,7 +186,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     std::array<VkImage,2> frames{frame_0.handle(),frame_1.handle()};
     for(unsigned i=0;i<2;++i) {
         barrier(before.handle(),frames[i],frameIdx ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL,
-            frameIdx ? VK_QUEUE_FAMILY_EXTERNAL : VK_QUEUE_FAMILY_IGNORED,frameIdx ? family : VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
+            frameIdx && !fsr ? VK_QUEUE_FAMILY_EXTERNAL : VK_QUEUE_FAMILY_IGNORED,frameIdx && !fsr ? family : VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
         if(seedBoth || i==frameIdx%2) {
             barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -188,12 +194,12 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
             barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,0);
         }
-        barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,VK_ACCESS_TRANSFER_WRITE_BIT,0);
+        barrier(before.handle(),frames[i],VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,fsr ? VK_QUEUE_FAMILY_IGNORED : family,fsr ? VK_QUEUE_FAMILY_IGNORED : VK_QUEUE_FAMILY_EXTERNAL,VK_ACCESS_TRANSFER_WRITE_BIT,fsr ? VK_ACCESS_SHADER_READ_BIT : 0);
     }
     if(frameIdx==0) for(auto& image:out_n) {
         barrier(before.handle(),image.handle(),VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,0);
-        barrier(before.handle(),image.handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,0,0);
+        if(!fsr) barrier(before.handle(),image.handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,0,0);
     }
     if(ui) {
         // Use the same antialiased UI for the real frame too; alternating native
@@ -215,12 +221,19 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,capture ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT);
     } else barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT);
-    before.end(); before.submit(info.queue.second,waits,{pass.preCopySemaphores[0].handle(),actualReady.handle()});
-    if(frameIdx==0) DVLSFG::status("First frame: input submitted");
     std::vector<HANDLE> ready(conf.multiplier-1);
     for(auto& handle:ready) pass.renderSemaphores.emplace_back(info.device,&handle);
+    if(fsr) {
+        for(auto image:{ui->depth,ui->motion}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+        fsrFrameGeneration->dispatch(before.handle(),frames[frameIdx%2],out_n[0].handle(),*ui,seedBoth);
+        for(auto image:{ui->depth,ui->motion}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
+        before.end(); before.submit(info.queue.second,waits,{pass.renderSemaphores[0].handle(),actualReady.handle()});
+    } else {
+    before.end(); before.submit(info.queue.second,waits,{pass.preCopySemaphores[0].handle(),actualReady.handle()});
+    if(frameIdx==0) DVLSFG::status("First frame: input submitted");
     if(conf.performance) LSFG_3_1P::presentContext(*lsfgCtxId,inputReady,ready);
     else LSFG_3_1::presentContext(*lsfgCtxId,inputReady,ready);
+    }
     if(frameIdx==0) DVLSFG::status("First frame: compute submitted");
     VkResult result=VK_SUCCESS;
     VkResult resizeResult=VK_SUCCESS;
@@ -239,7 +252,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         pass.postCopyBufs.emplace_back(info.device,cmdPool);
         pass.postCopySemaphores.emplace_back(info.device);
         auto& copy=pass.postCopyBufs.back(); copy.begin();
-        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,VK_QUEUE_FAMILY_EXTERNAL,family,0,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT);
+        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,fsr ? VK_QUEUE_FAMILY_IGNORED : VK_QUEUE_FAMILY_EXTERNAL,fsr ? VK_QUEUE_FAMILY_IGNORED : family,fsr ? VK_ACCESS_SHADER_WRITE_BIT : 0,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT);
         if(!ui) barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_READ_BIT);
         VkImage generated=out_n[i].handle();
@@ -262,7 +275,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         }
         if(!ui) barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,0);
-        barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT,0);
+        if(!fsr) barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT,0);
         barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT);
         copy.end();

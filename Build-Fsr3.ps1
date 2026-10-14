@@ -55,6 +55,7 @@ foreach($shader in Get-ChildItem "$project/Assets/Shaders" -Filter '*fsr3upscale
     [IO.File]::WriteAllText($shader.FullName,$data,[Text.UTF8Encoding]::new($false))
 }
 Copy-Item "$PSScriptRoot/native/Fsr3BundleBuilder.cs" "$project/Assets/Editor" -Force
+Copy-Item "$PSScriptRoot/native/TemporalCapture.shader" "$project/Assets/Shaders" -Force
 New-Item -ItemType Directory "$PSScriptRoot/build/fsr3/bundle" -Force | Out-Null
 $log="$PSScriptRoot/build/fsr3/editor.log"
 $arguments=@('-batchmode','-nographics','-quit','-projectPath',('"'+$project+'"'),'-executeMethod','Fsr3BundleBuilder.Build','-logFile',('"'+$log+'"'))

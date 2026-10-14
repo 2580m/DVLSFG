@@ -30,6 +30,7 @@ $project=Split-Path $PSScriptRoot
 $run=Join-Path $project ('build/smoke-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $run | Out-Null
 Copy-Item "$project/build/native/Release/DVLSFG.Native.dll", "$project/package/VkLayer_DVLSFG.json" $run
+Copy-Item "$project/build/native/Release/DVLSFG.FSRFG.dll" $run
 $enabledValue=if($Disabled){'0'}else{'1'}
 $performanceValue=if($Performance){'1'}else{'0'}
 [IO.File]::WriteAllText("$run/config.ini", "Enabled=$enabledValue`nDllPath=$LosslessDll`nMultiplier=$Multiplier`nPerformance=$performanceValue`nFlowScale=1`n", [Text.UTF8Encoding]::new($false))

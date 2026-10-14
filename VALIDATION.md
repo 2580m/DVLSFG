@@ -670,3 +670,43 @@ waits for device completion before reusing images; asynchronous optimization is
 future work. Test-process layer variables do not modify global Vulkan settings.
 The release archive excludes model DLLs, extracted shaders, logs, captures and
 personal configuration.
+
+## FSR 3.1 frame generation 0.6.0 (2026-10-15)
+
+Official FidelityFX-SDK v1.1.3 optical-flow and frame-interpolation Vulkan
+components are integrated, independently of LSFG and the selected upscaler.
+`FsrFrameGenerationGpuTests` renders a moving bar and checks three generated
+centroids at the exact midpoint of previous/current native positions. With no
+Lossless.dll, no debug-utils extension and no promoted KHR extension names,
+it passed (3072 changed pixels; centroids 83.5/107.5/131.5 versus native
+95.5/119.5/143.5). Vulkan validation 1.4.363 reported no warnings or errors after
+fixing duplicate image registration and the SDK's missing storage-buffer pool
+entry. Original LSFG 4x present-metadata regression also passed: 12 native /
+36 generated frames, zero validation messages.
+
+The standalone game fixture passed with an empty Lossless.dll path, native
+resolution and FSR1/FSR3 upscaling. Every path demonstrated changed moving-scene
+pixels, finite nonzero engine motion vectors and nonconstant raw reversed depth.
+At each upscaler setting, submitted generated/native counters stayed 1:1.
+Opaque and semitransparent UI matched the native frame, with identical 596 MSAA
+edge pixels and maximum opaque-edge RGB error zero. It passed 1280x720 resize,
+UMM IMGUI pause and camera-space UI bypass. GPU readback in the fixture causes
+long CPU frames, so interpolation proof waits for the intended history reset to
+settle; production does not perform these readbacks.
+The saved driving-world fixture passed five FSR3 upscaling quality levels,
+Forward and DeferredShading, 1280x720 resize, and FSR3 -> FSR1 -> FSR3 transitions.
+At quality checks, temporal input sizes matched scene targets, output/UI stayed
+at display resolution, scene AA was replaced only by the upscaler, and screen
+picking rays matched viewport rays. Native/generated totals remained 1:1
+(e.g. 147/147, 1129/1129, 1458/1458, 2356/2356 and 2930/2930). Existing unrelated
+mods remained enabled. The test now filters for cameras still owning their
+scene targets, excluding stale components during camera/quality transitions.
+User save data, preferences and mod configuration were backed up and restored.
+Tests do not establish visual quality in every weather/transparent-effect
+scenario or support across other GPUs; this run used the RTX 3070 Ti.
+Native Graphics UI checks passed the Off/LSFG 3.1/FSR 3.1 selector, fixed FSR
+2x display, immediate disabling of LSFG-only controls, AA preservation with
+upscaling disabled, Discard restoration, localization, blank-area scrolling,
+Apply/Discard persistence and original LSFG live model/flow switching. The
+launcher fixture also confirmed FSR starts with an empty Lossless.dll path;
+LSFG probing and existing recovery/conflict checks remained valid.

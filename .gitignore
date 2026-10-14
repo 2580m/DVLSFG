@@ -1,6 +1,8 @@
 /build/
+/native/bin/
 /dist/
 /vendor/lsfg-vk/
 /vendor/shader-hashes.cpp
 /vendor/FSR3Unity/
+/vendor/FidelityFX-SDK/
 .vscode/settings.json

@@ -5,6 +5,25 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 find_package(Vulkan REQUIRED)
+set(FFX_API_BACKEND VK_X64 CACHE STRING "" FORCE)
+set(FFX_API_VK ON CACHE BOOL "" FORCE)
+set(FFX_FI ON CACHE BOOL "" FORCE)
+set(FFX_OF ON CACHE BOOL "" FORCE)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../vendor/FidelityFX-SDK/sdk" fidelityfx)
+# AMD's swapchain helper uses MSVC's temporary-reference extension. Our
+# presentation layer remains in charge of the swapchain.
+target_compile_options(ffx_backend_vk_x64 PRIVATE /permissive /Zc:strictStrings-)
+target_compile_options(ffx_backend_vk_x64 PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/fsr_vk_bridge.hpp")
+# SDK v1.1.3 defines six pool entries but accidentally passes five, omitting
+# storage buffers required by optical flow. Keep the checkout unmodified.
+set(FFX_VK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/FidelityFX-SDK/sdk/src/backends/vk/ffx_vk.cpp")
+get_filename_component(FFX_VK_SOURCE "${FFX_VK_SOURCE}" ABSOLUTE)
+file(READ "${FFX_VK_SOURCE}" FFX_VK_TEXT)
+string(REPLACE "descriptorPoolCreateInfo.poolSizeCount = 5;" "descriptorPoolCreateInfo.poolSizeCount = 6;" FFX_VK_TEXT "${FFX_VK_TEXT}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ffx_vk_patched.cpp" "${FFX_VK_TEXT}")
+get_target_property(FFX_VK_SOURCES ffx_backend_vk_x64 SOURCES)
+list(REMOVE_ITEM FFX_VK_SOURCES "${FFX_VK_SOURCE}")
+set_property(TARGET ffx_backend_vk_x64 PROPERTY SOURCES ${FFX_VK_SOURCES} "${CMAKE_CURRENT_BINARY_DIR}/ffx_vk_patched.cpp")
 add_compile_definitions(VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 add_compile_options(/utf-8 /wd4068)
 set(UP "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/lsfg-vk")
@@ -23,7 +42,15 @@ add_library(DVLSFG.Native SHARED ${BACKEND} ${MINI}
   "${PORT}/src/utils/utils.cpp" "${PORT}/src/extract/extract.cpp" "${PORT}/src/extract/trans.cpp"
   runtime.cpp scene_ui.cpp exports.def)
 target_include_directories(DVLSFG.Native PRIVATE . "${PORT}/include" "${PORT}/framegen/include" "${PORT}/framegen/public" "${PORT}/framegen/v3.1_include" "${PORT}/framegen/v3.1p_include" ${Vulkan_INCLUDE_DIRS})
-target_link_libraries(DVLSFG.Native PRIVATE dxbc volk)
+add_library(DVLSFG.FSRFG SHARED fsr_framegen.cpp)
+target_compile_definitions(DVLSFG.FSRFG PRIVATE DVSCALING_FSRFG_BUILD)
+target_link_libraries(DVLSFG.FSRFG PRIVATE ffx_backend_vk_x64 ffx_frameinterpolation_x64 ffx_opticalflow_x64)
+target_link_options(DVLSFG.FSRFG PRIVATE /MAP)
+add_executable(DVLSFG.FsrFrameGenerationGpuTests ../tests/FsrFrameGenerationGpu.cpp)
+target_include_directories(DVLSFG.FsrFrameGenerationGpuTests PRIVATE .)
+target_link_libraries(DVLSFG.FsrFrameGenerationGpuTests PRIVATE DVLSFG.FSRFG Vulkan::Vulkan)
+target_link_libraries(DVLSFG.Native PRIVATE dxbc volk DVLSFG.FSRFG)
+target_link_options(DVLSFG.Native PRIVATE /MAP)
 find_program(GLSLANG_EXECUTABLE glslangValidator HINTS "${Vulkan_ROOT}/Bin" REQUIRED)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/scene_ui_spv.h"
     COMMAND "${GLSLANG_EXECUTABLE}" -V --vn scene_ui_spv -o "${CMAKE_CURRENT_BINARY_DIR}/scene_ui_spv.h" "${CMAKE_CURRENT_SOURCE_DIR}/scene_ui.comp"

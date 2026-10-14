@@ -1,4 +1,16 @@
-# DV LSFG 0.5.1 (experimental)
+# DV Scaling 0.6.0 (experimental)
+
+
+## 0.6.0: FSR 3.1 frame generation
+
+Frame Generation now selects Off, LSFG 3.1 or FSR 3.1. AMD's official optical-flow
+and frame-interpolation algorithms use the engine's actual depth and motion
+vectors and produce a fixed 2x output. Model and optical-flow quality belong to
+LSFG and are disabled for FSR. FSR FG works independently of upscaling (Off,
+FSR 1.0 or FSR 3.1) and requires no Lossless.dll. Restart after changing the frame
+generation technology. FSR FG alone preserves native antialiasing; only FSR 3.1
+upscaling replaces scene AA. UI retains independent AA and composition. After
+initial deployment, launch normally through Steam or the existing shortcut.
 
 0.5.1 preserves UI antialiasing. FSR 3.1 disables MSAA/postprocessing AA only on
 its scene cameras, leaving global MSAA unchanged. UI uses its own multisample

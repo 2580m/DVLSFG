@@ -30,6 +30,10 @@ class SettingsTests {
             File.WriteAllText(path,"Enabled=1\nMultiplier=4\nFlowScale=0.75\n");
             var legacy=Settings.Read(path);
             Assert(legacy.FsrMode==0 && legacy.FsrSharpness==.2f && legacy.Multiplier==4,"Legacy config migration changed behavior");
+            Assert(legacy.FrameGenerationTechnology==1 && legacy.Enabled,"Legacy frame generation no longer selects LSFG");
+            settings.FrameGenerationTechnology=2; settings.DllPath=""; settings.Save(path);
+            restored=Settings.Read(path);
+            Assert(restored.FrameGenerationTechnology==2 && restored.DllPath=="","FSR frame generation persistence requires a model DLL");
             foreach(float invalid in new[]{float.NaN,float.PositiveInfinity,-.1f,1.1f}) {
                 settings.FsrSharpness=invalid;
                 bool rejected=false; try {settings.Validate();} catch(InvalidDataException) {rejected=true;}

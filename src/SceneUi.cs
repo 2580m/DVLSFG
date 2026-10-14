@@ -26,6 +26,7 @@ namespace DVLSFG {
             bool value=Main.modEntry.Active && Main.settings.Enabled;
             if(value!=requested) {requested=value; DVLSFG_SetSceneUiEnabled(value ? 1 : 0);}
             foreach(var camera in Cameras) if(camera) camera.enabled=value && !FsrRuntime.Requested;
+            foreach(var camera in TemporalSceneCamera.Cameras) if(camera) camera.enabled=value && Main.settings.FrameGenerationTechnology==2 && Main.runtimeSettings.FrameGenerationTechnology==2;
             if(!value) {if(capture) capture.ResetCapture(); discovered=false; return;}
             if(!capture) {var go=new GameObject("DV Scaling scene/UI separation"); UnityEngine.Object.DontDestroyOnLoad(go); capture=go.AddComponent<SceneUiCapture>();}
             if(!discovered) {

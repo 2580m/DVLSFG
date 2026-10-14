@@ -66,7 +66,7 @@ namespace DVLSFGTests {
                             var scroll=marker.GetComponent<ScrollRect>();
                             if(!scroll || !scroll.vertical || !scroll.verticalScrollbar) throw new Exception("Graphics scroll controls absent");
                             foreach(int removed in new[]{4,5,9}) if(rows[removed]) throw new Exception("Read-only status/prompt row remains: "+removed);
-                            if(rows[0].GetValues()[1]!="LSFG 3.1" || rows[6].GetValues()[1]!="FSR 1.0" || rows[8].GetValues().Count!=5) throw new Exception("Technology/quality selectors incorrect");
+                            if(rows[0].GetValues().Count!=3 || rows[0].GetValues()[1]!="LSFG 3.1" || rows[0].GetValues()[2]!="FSR 3.1" || rows[6].GetValues()[1]!="FSR 1.0" || rows[8].GetValues().Count!=5) throw new Exception("Technology/quality selectors incorrect");
                             var section=rows[6].transform.parent;
                             if(section!=rows[8].transform.parent || rows[8].transform.GetSiblingIndex()!=6 || section.childCount!=8 || section.GetChild(7).name!="DVLSFG Graphics gap") throw new Exception("Quality row or reserved gap misplaced");
                             if(section.parent.GetChild(1).name!="DVLSFG technology divider" || section.parent.GetChild(2).name!="DVLSFG native settings section") throw new Exception("Native section divider missing");
@@ -105,6 +105,14 @@ namespace DVLSFGTests {
                     if(rows[6].SelectedIndex!=originalTechnology) throw new Exception("FSR3 technology discard failed");
                     foreach(var control in aaControls) if(control.Key.IsInteractable!=control.Value) throw new Exception("FSR3 discard did not restore native antialiasing");
                     entry.Logger.Log("FSR3 UI PASS: technology selection immediately disables native antialiasing; Discard restores availability");
+                    rows[6].SetSelectedIndex(0,true);
+                    var nativeAa=new System.Collections.Generic.Dictionary<Selector,bool>();
+                    foreach(var control in aaControls) nativeAa[control.Key]=control.Key.IsInteractable;
+                    rows[0].SetSelectedIndex(2,true);
+                    if(rows[1].IsInteractable || rows[2].IsInteractable || rows[3].IsInteractable || rows[1].SelectedIndex!=0) throw new Exception("FSR FG does not show fixed 2x and disable LSFG-only controls");
+                    foreach(var control in nativeAa) if(control.Key.IsInteractable!=control.Value) throw new Exception("FSR FG changed native antialiasing without FSR upscaling");
+                    ((Button)AccessTools.Field(typeof(SettingsController),"revertChanges").GetValue(controller)).onClick.Invoke();
+                    entry.Logger.Log("FSR FG UI PASS: fixed 2x, LSFG controls disabled, AA preserved and pending technology discarded");
                     string originalLanguage=LocalizationManager.CurrentLanguage;
                     try {
                         foreach(string language in new[]{"English","Chinese (Simplified)","German"}) {
@@ -137,7 +145,7 @@ namespace DVLSFGTests {
                     }
                     ((Button)AccessTools.Field(typeof(SettingsController),"revertChanges").GetValue(controller)).onClick.Invoke();
                     if(rows[0].SelectedIndex!=originalGeneration || rows[6].SelectedIndex!=originalUpscaling || rows[1].SelectedIndex!=originalMultiplier || rows[2].SelectedIndex!=originalModel || rows[3].SelectedIndex!=originalFlow || rows[8].SelectedIndex!=originalQuality || sharpness.value!=originalSharpness) throw new Exception("Technology toggle/discard lost selected values");
-                    if(rows[1].IsInteractable!=(originalGeneration==1) || rows[8].IsInteractable!=(originalUpscaling==1) || sharpness.IsInteractable!=(originalUpscaling==1)) throw new Exception("Discard did not restore dependent interactability");
+                    if(rows[1].IsInteractable!=(originalGeneration==1) || rows[8].IsInteractable!=(originalUpscaling>0) || sharpness.IsInteractable!=(originalUpscaling>0)) throw new Exception("Discard did not restore dependent interactability");
                     entry.Logger.Log("DEPENDENT CONTROLS PASS: immediate disable/enable before Apply, native interactability, retained values and Discard restore");
                     var nativeTooltip=rows[2].GetComponent<UIElementTooltip>();
                     var handler=(TooltipHandler)AccessTools.Field(typeof(UIElementTooltip),"tooltipHandler").GetValue(nativeTooltip);

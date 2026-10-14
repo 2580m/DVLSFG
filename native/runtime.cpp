@@ -17,6 +17,7 @@
 #include <iomanip>
 
 Config::Configuration Config::activeConf{};
+static int frameGenerationTechnology=1;
 void Config::updateConfig(const std::string&) {} // Live multiplier requests use the present-boundary API.
 Config::Configuration Config::getConfig(const std::pair<std::string,std::string>&) { return activeConf; }
 extern const std::unordered_map<std::string, uint32_t> nameIdxTable;
@@ -63,6 +64,7 @@ void status(const std::string& message) {
     std::cerr << "DVLSFG: " << message << '\n';
 }
 bool isEnabled() { return enabled.load(); }
+int generationTechnology() {return frameGenerationTechnology;}
 unsigned long long epoch() { return generationEpoch.load(); }
 std::filesystem::path captureDirectory() { return configPath.parent_path()/"captures"; }
 bool takeCapture() {
@@ -141,19 +143,21 @@ void initialize() {
             }
             auto& conf = Config::activeConf;
             conf.dll = values["DllPath"];
+            frameGenerationTechnology=values["FrameGenerationTechnology"]=="2" ? 2 : 1;
             conf.multiplier = static_cast<size_t>(std::stoi(values["Multiplier"]));
             if (conf.multiplier < 2 || conf.multiplier > 4) throw std::runtime_error("Multiplier must be 2..4");
             conf.performance = values["Performance"] == "1";
+            if(frameGenerationTechnology==2) {conf.multiplier=2; conf.performance=false;}
             conf.flowScale = std::stof(values["FlowScale"]);
             if (!(conf.flowScale >= 0.25f && conf.flowScale <= 1.f)) throw std::runtime_error("FlowScale must be 0.25..1");
             { std::lock_guard<std::mutex> guard(settingsLock); appliedSettings={static_cast<int>(conf.multiplier),conf.performance,conf.flowScale}; }
             conf.e_present = VK_PRESENT_MODE_IMMEDIATE_KHR;
             conf.hdr = false;
             if (values["Enabled"] != "1") { status("Disabled in config.ini"); return; }
-            Extract::extractShaders();
+            if(frameGenerationTechnology==1) Extract::extractShaders();
             conf.enable = true;
             enabled = true;
-            status("LSFG 3.1 resources loaded; waiting for Vulkan swapchain");
+            status(frameGenerationTechnology==2 ? "FSR 3.1 frame generation selected; waiting for scene inputs" : "LSFG 3.1 resources loaded; waiting for Vulkan swapchain");
         } catch (const std::exception& e) { status(std::string("Disabled: ") + e.what()); }
     });
 }
@@ -181,6 +185,7 @@ extern "C" __declspec(dllexport) void DVLSFG_SetEnabled(int value) {
 extern "C" __declspec(dllexport) void DVLSFG_RequestCapture() { capturePending=true; }
 // The UI only posts requests. Vulkan objects/configuration are changed at a present boundary.
 extern "C" __declspec(dllexport) int DVLSFG_SetMultiplier(int value) {
+    if(frameGenerationTechnology==2) return 0;
     if(value<2 || value>4 || !Config::activeConf.enable) return 0;
     std::lock_guard<std::mutex> guard(settingsLock);
     if(!settingsPending) requestedSettings=appliedSettings;
@@ -193,6 +198,7 @@ extern "C" __declspec(dllexport) int DVLSFG_GetMultiplier(int* value) {
     return settingsPending ? 1 : settingsState;
 }
 extern "C" __declspec(dllexport) int DVLSFG_SetGenerationSettings(int multiplier,int performance,float flowScale) {
+    if(frameGenerationTechnology==2) return 0;
     if(multiplier<2 || multiplier>4 || performance<0 || performance>1 ||
        !(flowScale>=.25f && flowScale<=1.f) || !Config::activeConf.enable) return 0;
     std::lock_guard<std::mutex> guard(settingsLock);
