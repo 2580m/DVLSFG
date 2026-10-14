@@ -65,7 +65,8 @@ namespace DVLSFG {
         }
     }
     public sealed class SceneUiCapture : MonoBehaviour {
-        RenderTexture scene,black,white;
+        RenderTexture scene,black,white,uiMsaa;
+        int uiSamples,requestedUiSamples;
         Camera uiCamera;
         IntPtr job,callback;
         CommandBuffer publish;
@@ -88,18 +89,26 @@ namespace DVLSFG {
             if(!target.Create()) {Destroy(target); throw new InvalidOperationException("Scene/UI capture allocation failed");}
             return target;
         }
+        static int UiSampleCount(int requested) {
+            var descriptor=new RenderTextureDescriptor(Screen.width,Screen.height,RenderTextureFormat.ARGBHalf,24);
+            descriptor.msaaSamples=requested;
+            return SystemInfo.GetRenderTextureSupportedMSAASampleCount(descriptor);
+        }
         internal void Capture(RenderTexture source) {
             if(failed || !source || Screen.width<128 || Screen.height<128) return;
             try {
-                if(!scene || scene.width!=Screen.width || scene.height!=Screen.height) {Clear(); Create();}
+                if(!scene || scene.width!=Screen.width || scene.height!=Screen.height || requestedUiSamples!=Mathf.Max(4,QualitySettings.antiAliasing)) {Clear(); Create();}
                 Graphics.Blit(source,scene); capturedFrame=Time.frameCount;
             } catch(Exception e) {failed=true; Clear(); Main.modEntry.Logger.Error("Scene/UI capture: "+e);}
         }
         void Create() {
             scene=Target("DV Scaling scene without screen UI"); black=Target("DV Scaling UI over black"); white=Target("DV Scaling UI over white");
+            requestedUiSamples=Mathf.Max(4,QualitySettings.antiAliasing); uiSamples=UiSampleCount(requestedUiSamples);
+            uiMsaa=new RenderTexture(Screen.width,Screen.height,24,RenderTextureFormat.ARGBHalf,RenderTextureReadWrite.Linear) {name="DV Scaling antialiased UI",antiAliasing=uiSamples};
+            if(!uiMsaa.Create()) throw new InvalidOperationException("UI MSAA allocation failed");
             var go=new GameObject("DV Scaling UI capture camera"); go.transform.SetParent(transform,false);
             uiCamera=go.AddComponent<Camera>(); uiCamera.enabled=false; uiCamera.orthographic=true; uiCamera.orthographicSize=Screen.height/2f;
-            uiCamera.nearClipPlane=.1f; uiCamera.farClipPlane=100; uiCamera.cullingMask=1<<31; uiCamera.clearFlags=CameraClearFlags.SolidColor; uiCamera.allowHDR=true; uiCamera.allowMSAA=false;
+            uiCamera.nearClipPlane=.1f; uiCamera.farClipPlane=100; uiCamera.cullingMask=1<<31; uiCamera.clearFlags=CameraClearFlags.SolidColor; uiCamera.allowHDR=true; uiCamera.allowMSAA=true;
             callback=SceneUiRuntime.DVLSFG_GetSceneUiEvent();
             publish=new CommandBuffer {name="DV Scaling publish scene/UI"};
             job=SceneUiRuntime.DVLSFG_CreateSceneUi(scene.GetNativeTexturePtr(),black.GetNativeTexturePtr(),white.GetNativeTexturePtr());
@@ -146,8 +155,11 @@ namespace DVLSFG {
                     saved.Canvas.renderMode=RenderMode.ScreenSpaceCamera; saved.Canvas.worldCamera=uiCamera; saved.Canvas.planeDistance=1;
                 }
                 Canvas.ForceUpdateCanvases();
-                uiCamera.backgroundColor=Color.black; uiCamera.targetTexture=black; uiCamera.Render();
-                uiCamera.backgroundColor=Color.white; uiCamera.targetTexture=white; uiCamera.Render();
+                // Resolve after rasterizing UI geometry with MSAA. The native
+                // bridge still receives single-sample float textures.
+                uiCamera.targetTexture=uiMsaa;
+                uiCamera.backgroundColor=Color.black; uiCamera.Render(); Graphics.Blit(uiMsaa,black);
+                uiCamera.backgroundColor=Color.white; uiCamera.Render(); Graphics.Blit(uiMsaa,white);
             } finally {
                 uiCamera.targetTexture=null;
                 foreach(var saved in canvases) if(saved.Canvas) {
@@ -166,6 +178,7 @@ namespace DVLSFG {
             if(publish!=null) {publish.Dispose(); publish=null;}
             if(uiCamera) {Destroy(uiCamera.gameObject); uiCamera=null;}
             if(scene) Destroy(scene); if(black) Destroy(black); if(white) Destroy(white); scene=black=white=null;
+            if(uiMsaa) Destroy(uiMsaa); uiMsaa=null;
         }
         internal void ResetCapture() {Clear(); failed=false;}
         void OnDestroy() {Clear();}

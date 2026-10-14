@@ -1,5 +1,16 @@
 # DVLSFG upstream provenance
 
+## UI antialiasing (0.5.1)
+
+FSR3 camera targets remain single-sample, with allowMSAA false and postprocess AA
+None. The global quality setting is left to the game, preserving native UI and
+other cameras. The isolated UI camera uses a separate ARGBHalf MSAA/depth-stencil
+target, resolved into the existing single-sample black/white interop surfaces.
+The sample count retains the game's setting with a minimum request of 4x, clamped
+by SystemInfo's supported sample count. Both real and generated swapchain images
+receive the same resolved UI. Native real-frame composition samples the current
+linear scene, while generated composition decodes the LSFG input encoding first.
+
 ## Scene/UI separation (0.5.0)
 
 `src/SceneUi.cs` captures the final scene before screen-space Canvas UI. The live

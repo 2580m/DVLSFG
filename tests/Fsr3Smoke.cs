@@ -59,7 +59,7 @@ namespace DVLSFGTests {
             var output=(RenderTexture)AccessTools.Field(typeof(Fsr3SceneCamera),"OutputTarget").GetValue(fsr);
             var frames=(ulong)AccessTools.Field(typeof(Fsr3SceneCamera),"frames").GetValue(fsr);
             if(!fsr.enabled || !input || !output || frames<10) throw new Exception("FSR3 reconstruction inactive");
-            if(output.width!=Screen.width || output.height!=Screen.height || input.width>=output.width || QualitySettings.antiAliasing!=0) throw new Exception("FSR3 dimensions or AA override wrong");
+            if(output.width!=Screen.width || output.height!=Screen.height || input.width>=output.width || input.antiAliasing!=1 || camera.allowMSAA || QualitySettings.antiAliasing!=oldAa) throw new Exception("FSR3 dimensions or scene/UI AA scope wrong");
             var before=Pixel(input); var after=Pixel(output);
             if(before.r<30 || before.b<30 || Math.Abs(before.r-after.r)>8 || Math.Abs(before.g-after.g)>8 || Math.Abs(before.b-after.b)>8) throw new Exception("FSR3 GPU output differs: "+before+" -> "+after);
             Log("PASS FSR3 mode="+mode+" "+input.width+"x"+input.height+" -> "+output.width+"x"+output.height+" frames="+frames+" pixel="+before+" -> "+after);

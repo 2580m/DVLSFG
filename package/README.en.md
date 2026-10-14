@@ -1,4 +1,9 @@
-# DV LSFG 0.5.0 (experimental)
+# DV LSFG 0.5.1 (experimental)
+
+0.5.1 preserves UI antialiasing. FSR 3.1 disables MSAA/postprocessing AA only on
+its scene cameras, leaving global MSAA unchanged. UI uses its own multisample
+target (at least 4x, retaining higher configured values where supported), then
+resolves to both real and generated frames to prevent alternating edge shimmer.
 
 0.5.0 excludes screen-space Canvas UI from LSFG input. The scene is interpolated,
 then current opaque/translucent UI is composited at native resolution on each

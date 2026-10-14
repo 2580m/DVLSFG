@@ -13,8 +13,6 @@ namespace DVLSFG {
         internal static Fsr3UpscalerShaders Shaders;
         static AssetBundle bundle;
         static string failure;
-        static int previousMsaa;
-        static bool overridingAa;
         internal static bool Requested {get {return FsrRuntime.Requested && Main.settings.FsrTechnology==2;}}
         static ComputeShader Load(string name) {
             var shader=bundle.LoadAsset<ComputeShader>("ffx_fsr3upscaler_"+name+"_pass");
@@ -24,7 +22,6 @@ namespace DVLSFG {
         internal static void Tick() {
             if(!Requested) {
                 foreach(var camera in Cameras) if(camera) {camera.enabled=false; camera.Failed=false;}
-                if(overridingAa) {if(QualitySettings.antiAliasing==0) QualitySettings.antiAliasing=previousMsaa; overridingAa=false;}
                 return;
             }
             if(Shaders==null && failure==null) try {
@@ -41,8 +38,8 @@ namespace DVLSFG {
             } catch(Exception e) {failure=e.Message; Main.modEntry.Logger.Error("FSR3: "+e);}
             if(Shaders==null) return;
             foreach(var camera in Cameras) if(camera && !camera.Failed) camera.enabled=true;
-            if(!overridingAa) {previousMsaa=QualitySettings.antiAliasing; overridingAa=true;}
-            if(QualitySettings.antiAliasing!=0) {previousMsaa=QualitySettings.antiAliasing; QualitySettings.antiAliasing=0;}
+            // Disable native AA on owned scene cameras/targets only. The global
+            // quality setting is also used by native screen UI and other cameras.
         }
         internal static string Status {get {
             if(failure!=null) return L10n.Get("dv_scaling/unavailable")+failure;

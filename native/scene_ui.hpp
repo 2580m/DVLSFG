@@ -20,6 +20,6 @@ class UiComposite {
 public:
     UiComposite(VkDevice device,VkPhysicalDevice physical,VkExtent2D extent,VkFormat swapchainFormat);
     void prepare(const SceneUiFrame& frame,const std::vector<VkImage>& generated);
-    VkImage record(VkCommandBuffer command,size_t generatedIndex,bool sceneOnly=false);
+    VkImage record(VkCommandBuffer command,size_t generatedIndex,bool sceneOnly=false,bool realScene=false);
 };
 }

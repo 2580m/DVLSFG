@@ -173,13 +173,13 @@ void UiComposite::prepare(const SceneUiFrame& frame,const std::vector<VkImage>& 
     }
     s.bindingsReady=true;
 }
-VkImage UiComposite::record(VkCommandBuffer command,size_t index,bool sceneOnly) {
+VkImage UiComposite::record(VkCommandBuffer command,size_t index,bool sceneOnly,bool realScene) {
     auto& s=*state;
     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}; b.image=s.output.handle(); b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_GENERAL; b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b.srcAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     Layer::ovkCmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,0,nullptr,0,nullptr,1,&b);
     s.fn<PFN_vkCmdBindPipeline>("vkCmdBindPipeline")(command,VK_PIPELINE_BIND_POINT_COMPUTE,s.pipeline);
     s.fn<PFN_vkCmdBindDescriptorSets>("vkCmdBindDescriptorSets")(command,VK_PIPELINE_BIND_POINT_COMPUTE,s.layout,0,1,&s.sets.at(index),0,nullptr);
-    uint32_t mode=(sceneOnly ? 1u : 0u)|(s.encoded ? 2u : 0u);
+    uint32_t mode=(sceneOnly ? 1u : 0u)|(s.encoded ? 2u : 0u)|(realScene ? 4u : 0u);
     s.fn<PFN_vkCmdPushConstants>("vkCmdPushConstants")(command,s.layout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(mode),&mode);
     s.fn<PFN_vkCmdDispatch>("vkCmdDispatch")(command,(s.extent.width+7)/8,(s.extent.height+7)/8,1);
     b.oldLayout=VK_IMAGE_LAYOUT_GENERAL; b.newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; b.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;

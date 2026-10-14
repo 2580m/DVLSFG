@@ -20,6 +20,7 @@ namespace DVLSFGTests {
         int oldWidth,oldHeight; FullScreenMode oldScreenMode;
         int pausedCaptureFrame;
         int oldMultiplier; bool oldPerformance;
+        int originalUiAa;
         readonly System.Collections.Generic.List<Canvas> hidden=new System.Collections.Generic.List<Canvas>();
         void Log(string text) {Entry.Logger.Log(text); File.AppendAllText(Path.Combine(Entry.Path,"scene-ui.log"),text+"\n");}
         void Fail(Exception e) {Log("FAIL "+e); Restore(); File.WriteAllText(Path.Combine(Entry.Path,"failed.txt"),e.ToString());}
@@ -28,6 +29,7 @@ namespace DVLSFGTests {
             settings=(Settings)AccessTools.Field(typeof(Main),"settings").GetValue(null); oldMode=settings.FsrMode; oldTechnology=settings.FsrTechnology;
             oldWidth=Screen.width; oldHeight=Screen.height; oldScreenMode=Screen.fullScreenMode;
             oldMultiplier=settings.Multiplier; oldPerformance=settings.Performance;
+            originalUiAa=QualitySettings.antiAliasing;
             try {
                 var uiType=typeof(UnityModManager).GetNestedType("UI",System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic);
                 foreach(var member in uiType.GetMembers(System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Static)) if(member.Name.ToLowerInvariant().Contains("open")) Log("UMM member "+member.MemberType+" "+member.Name);
@@ -40,6 +42,10 @@ namespace DVLSFGTests {
                 canvas=root.GetComponent<Canvas>(); canvas.renderMode=RenderMode.ScreenSpaceOverlay; canvas.sortingOrder=32760;
                 opaque=Panel("opaque",new Vector2(-200,0),new Color(.1f,.9f,.2f,1));
                 translucent=Panel("translucent",new Vector2(200,0),new Color(.9f,.1f,.2f,.5f));
+                opaque.rectTransform.anchoredPosition+=new Vector2(.35f,7.25f);
+                opaque.rectTransform.localRotation=Quaternion.Euler(0,0,13);
+                translucent.rectTransform.anchoredPosition+=new Vector2(.4f,-7.2f);
+                translucent.rectTransform.localRotation=Quaternion.Euler(0,0,-7);
             } catch(Exception e) {Fail(e); yield break;}
             for(int technology=0;technology<=2;++technology) {
                 settings.FsrTechnology=technology; settings.FsrMode=technology==0 ? 0 : 3;
@@ -60,11 +66,13 @@ namespace DVLSFGTests {
                         if(generated==null) throw new Exception("No generated capture; bridge/presentation inactive");
                         var input=generated.Replace("-generated.bmp","-input.bmp");
                         var capture=UnityEngine.Object.FindObjectOfType<SceneUiCapture>();
+                        CheckUiAa(capture,technology);
                         foreach(var field in new[]{"scene","black","white"}) {
                             var surface=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),field).GetValue(capture);
                             Log(field+" left="+Pixel(surface,Screen.width/2-200,Screen.height/2)+" right="+Pixel(surface,Screen.width/2+200,Screen.height/2));
                         }
                         foreach(int offset in new[]{-200,200}) Compare(input,generated,Screen.width/2+offset,Screen.height/2);
+                        CheckPresentedEdges(input,generated);
                         var target=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"scene").GetValue(capture);
                         var pixel=Pixel(target,Screen.width/2-200,Screen.height/2);
                         if(pixel.g>.7f || pixel.r>.7f) throw new Exception("UI contaminated scene input: "+pixel);
@@ -113,6 +121,40 @@ namespace DVLSFGTests {
             var go=new GameObject(name,typeof(RectTransform),typeof(Image)); go.transform.SetParent(canvas.transform,false);
             var rect=go.GetComponent<RectTransform>(); rect.anchorMin=rect.anchorMax=new Vector2(.5f,.5f); rect.sizeDelta=new Vector2(180,180); rect.anchoredPosition=position;
             var image=go.GetComponent<Image>(); image.color=color; return image;
+        }
+        void CheckUiAa(SceneUiCapture capture,int technology) {
+            if(QualitySettings.antiAliasing!=originalUiAa) throw new Exception("FSR changed global/UI AA");
+            var multisample=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"uiMsaa").GetValue(capture);
+            if(!multisample || multisample.antiAliasing<4 || multisample.depth<24) throw new Exception("UI MSAA/stencil target inactive");
+            var target=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"black").GetValue(capture);
+            var previous=RenderTexture.active; RenderTexture.active=target;
+            var pixels=new Texture2D(260,260,TextureFormat.RGBAFloat,false,true);
+            int partial=0;
+            try {
+                pixels.ReadPixels(new Rect(Screen.width/2-330,Screen.height/2-130,260,260),0,0); pixels.Apply();
+                foreach(var color in pixels.GetPixels()) {float coverage=Mathf.Max(color.r,Mathf.Max(color.g,color.b)); if(coverage>.01f && coverage<.99f) partial++;}
+            } finally {RenderTexture.active=previous; Destroy(pixels);}
+            if(partial<100) throw new Exception("Rotated subpixel UI edge remains aliased: partial pixels="+partial);
+            if(technology==2 && (camera.allowMSAA || camera.targetTexture.antiAliasing!=1)) throw new Exception("FSR3 scene AA not disabled");
+            Log("PASS UI AA: global="+originalUiAa+" UI="+multisample.antiAliasing+"x resolved partial edge pixels="+partial+" technology="+technology);
+        }
+        void CheckPresentedEdges(string input,string generated) {
+            var original=File.ReadAllBytes(input); var interpolated=File.ReadAllBytes(generated);
+            int width=BitConverter.ToInt32(original,18),height=BitConverter.ToInt32(original,22),start=BitConverter.ToInt32(original,10);
+            Func<int,int,int> offset=(x,y)=>start+((height<0 ? -height-1-y : y)*width+x)*4;
+            int center=offset(Screen.width/2-200,Screen.height/2),background=offset(Screen.width/2-200,Screen.height/2-130);
+            int originalPartial=0,generatedPartial=0,maxError=0;
+            for(int y=Screen.height/2-130;y<Screen.height/2+130;y++) for(int x=Screen.width/2-330;x<Screen.width/2-70;x++) {
+                int at=offset(x,y),aBg=0,aFg=0,bBg=0,bFg=0;
+                for(int c=0;c<3;c++) {
+                    aBg+=Math.Abs(original[at+c]-original[background+c]); aFg+=Math.Abs(original[at+c]-original[center+c]);
+                    bBg+=Math.Abs(interpolated[at+c]-interpolated[background+c]); bFg+=Math.Abs(interpolated[at+c]-interpolated[center+c]);
+                    maxError=Math.Max(maxError,Math.Abs(original[at+c]-interpolated[at+c]));
+                }
+                if(aBg>10 && aFg>10) originalPartial++; if(bBg>10 && bFg>10) generatedPartial++;
+            }
+            if(originalPartial<100 || generatedPartial<100 || maxError>5) throw new Exception("Presented UI AA mismatch: real="+originalPartial+" generated="+generatedPartial+" max error="+maxError);
+            Log("PASS presented UI AA: real partial="+originalPartial+" generated partial="+generatedPartial+" max RGB error="+maxError);
         }
         static Color Pixel(RenderTexture target,int x,int y) {
             var prior=RenderTexture.active; RenderTexture.active=target; var texture=new Texture2D(1,1,TextureFormat.RGBAFloat,false,true);

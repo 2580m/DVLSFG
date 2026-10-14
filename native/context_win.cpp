@@ -168,7 +168,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     before.begin();
     barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-    if(capture) inputCapture.record(before.handle(),swapchainImages.at(index));
+    if(capture && !ui) inputCapture.record(before.handle(),swapchainImages.at(index));
     VkImage sceneInput=swapchainImages.at(index);
     if(ui) {
         for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
@@ -195,7 +195,25 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,0);
         barrier(before.handle(),image.handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,0,0);
     }
-    barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    if(ui) {
+        // Use the same antialiased UI for the real frame too; alternating native
+        // single-sample UI with resolved UI would make its edges shimmer.
+        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+        auto real=uiComposite->record(before.handle(),out_n.size(),false,true);
+        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
+        barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+        blit(before.handle(),real,swapchainImages.at(index),extent);
+        if(capture) {
+            barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+            inputCapture.record(before.handle(),swapchainImages.at(index));
+        }
+        barrier(before.handle(),swapchainImages.at(index),capture ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,capture ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT);
+    } else barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT);
     before.end(); before.submit(info.queue.second,waits,{pass.preCopySemaphores[0].handle(),actualReady.handle()});
     if(frameIdx==0) DVLSFG::status("First frame: input submitted");

@@ -1,5 +1,35 @@
 # DVLSFG validation record
 
+## 0.5.1 preserve UI antialiasing
+
+Removes FSR3's global MSAA override; owned scene targets remain single-sample,
+scene allowMSAA remains false, and PPV2 AA remains None. UI rasterizes into an
+independent multisample ARGBHalf/depth-stencil target, then resolves to the
+single-sample interop textures. Requested UI samples are max(4, native quality),
+limited by hardware support. The same resolved UI is composited on the real
+swapchain image as well as generated images, preventing alternating edge quality.
+
+The GPU fixture uses rotated opaque/translucent panels at fractional positions.
+All FSR Off/1/3 paths retained native global MSAA 8 and resolved UI 8x. UI edges
+had 596 partially covered pixels; presented real/generated edges both had 596,
+with maximum RGB difference 0 in the opaque panel region. Interior translucent
+colors remained within one channel unit. Live 2x/3x standard and 4x performance,
+resize, UMM pause and camera-space fallback/multiplier rebuild passed.
+
+A combined pressure-test/world load timed out without a ready scene camera.
+GPU memory was 4771/8192 MiB; no allocation error established a cause. A separate
+restart entered the Continue save and passed all five quality modes, forward/
+deferred rendering, picking, resize and FSR1/3 transitions. Native world quality
+was MSAA 0, while independent UI MSAA stayed 4x and scene/post AA stayed disabled.
+This does not establish the cause of the earlier loading interruption.
+
+The baseline Vulkan host capture regression passed with validation 1.4.363;
+as above, it does not provide validation coverage of the Unity interop path.
+Local evidence: build/ui-aa-first.log and fixture, build/ui-aa-load-interrupted.log,
+build/ui-aa-final-fixture/scene-ui.log, build/ui-aa-world.log and fixture,
+and build/smoke-50ee041d0ddb4851b5d3a34f7afa3726. The extra UI multisample target
+and real-frame composition have memory/GPU cost; no performance gain is claimed.
+
 ## 0.5.0 scene-only frame generation
 
 Unity's postprocessed scene is captured before overlay UI, with FSR Off/1.0/3.1

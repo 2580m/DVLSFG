@@ -81,7 +81,7 @@ namespace DVLSFGTests {
             var fsr=Find(); if(!fsr) throw new Exception("No FSR3 world output: "+stage);
             var camera=fsr.GetComponent<Camera>();
             var output=(RenderTexture)AccessTools.Field(typeof(Fsr3SceneCamera),"OutputTarget").GetValue(fsr);
-            if(!output || output.width!=Screen.width || output.height!=Screen.height || QualitySettings.antiAliasing!=0 || camera.allowMSAA) throw new Exception("Invalid FSR3 output or native AA still active");
+            if(!output || output.width!=Screen.width || output.height!=Screen.height || camera.allowMSAA || camera.targetTexture.antiAliasing!=1) throw new Exception("Invalid FSR3 output or scene AA still active");
             var previous=RenderTexture.active; RenderTexture.active=output;
             var pixels=new Texture2D(1,1,TextureFormat.RGBAFloat,false,true);
             bool nonblack=false;
@@ -102,10 +102,12 @@ namespace DVLSFGTests {
             if(capture) {
                 var captured=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"scene").GetValue(capture);
                 if(!captured || captured.width!=Screen.width || captured.height!=Screen.height || (int)AccessTools.Field(typeof(SceneUiCapture),"CanvasCount").GetValue(capture)<1) throw new Exception("Scene/UI world capture is inactive");
+                var uiTarget=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"uiMsaa").GetValue(capture);
+                if(!uiTarget || uiTarget.antiAliasing<4) throw new Exception("World UI AA inactive");
                 foreach(var canvas in UnityEngine.Object.FindObjectsOfType<Canvas>()) if(canvas.isRootCanvas && canvas.renderMode!=RenderMode.WorldSpace && canvas.gameObject.layer==31) throw new Exception("UI layer was not restored after capture");
-                Log("PASS scene/UI world capture "+captured.width+"x"+captured.height+" canvases="+AccessTools.Field(typeof(SceneUiCapture),"CanvasCount").GetValue(capture));
+                Log("PASS scene/UI world capture "+captured.width+"x"+captured.height+" UI MSAA="+uiTarget.antiAliasing+" canvases="+AccessTools.Field(typeof(SceneUiCapture),"CanvasCount").GetValue(capture));
             }
-            Log("PASS "+stage+" camera="+camera.name+" target="+camera.targetTexture.width+"x"+camera.targetTexture.height+" output="+output.width+"x"+output.height+" rendering="+camera.actualRenderingPath+" post-AA="+(post==null ? "no PPV2 layer" : "None")+" native MSAA disabled, depth/motion enabled, finite pixels and picking rays");
+            Log("PASS "+stage+" camera="+camera.name+" target="+camera.targetTexture.width+"x"+camera.targetTexture.height+" output="+output.width+"x"+output.height+" rendering="+camera.actualRenderingPath+" post-AA="+(post==null ? "no PPV2 layer" : "None")+" scene MSAA disabled, UI/global MSAA="+QualitySettings.antiAliasing+", depth/motion enabled, finite pixels and picking rays");
         }
         void Restore() {if(settings!=null) {settings.FsrMode=oldMode; settings.FsrTechnology=oldTechnology;} Screen.SetResolution(oldWidth,oldHeight,oldScreenMode);}
     }
