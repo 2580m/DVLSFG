@@ -149,6 +149,15 @@ namespace DVLSFG {
             GUILayout.Label(AutoStartup.Installed ? T("普通启动接入已安装。","Automatic ordinary-launch integration installed.") : T("普通启动接入等待部署或重启。","Automatic launch integration awaiting deployment or restart."));
             if(AutoStartup.Error!=null) GUILayout.Label(AutoStartup.Error);
             GUILayout.Label("Lossless.dll " + T("完整路径","full path")); settings.DllPath=GUILayout.TextField(settings.DllPath);
+            if(string.IsNullOrEmpty(settings.DllPath) && Event.current.type==EventType.Repaint) {
+                var placeholder=new GUIStyle(GUI.skin.label);
+                placeholder.padding=GUI.skin.textField.padding;
+                placeholder.alignment=GUI.skin.textField.alignment;
+                placeholder.fontSize=GUI.skin.textField.fontSize;
+                placeholder.richText=false; placeholder.wordWrap=false; placeholder.clipping=TextClipping.Clip;
+                placeholder.normal.textColor=new Color(.75f,.75f,.75f,.65f);
+                GUI.Label(GUILayoutUtility.GetLastRect(),"C:/<YourLosslessScaling>/Lossless.dll",placeholder);
+            }
             GUILayout.BeginHorizontal(); GUILayout.Label(T("倍率：","Multiplier: ") + settings.Multiplier + "x");
             if(GUILayout.Button("2x")) settings.Multiplier=2;
             if(GUILayout.Button("3x")) settings.Multiplier=3;
