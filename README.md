@@ -1,4 +1,4 @@
-# DVLSFG
+# dv-scaling
 
 Independent Derail Valley / Unity Mod Manager mod for experimental LSFG 3.1 frame
 generation through a Windows Vulkan layer. Requires DVVulkan with deployed DXVK.
@@ -13,6 +13,11 @@ Source provenance and licenses: [UPSTREAM.md](UPSTREAM.md).
 Verification and remaining limits: [VALIDATION.md](VALIDATION.md).
 
 ## Build
+
+The source project directory is `dv-scaling`, matching the installation/package
+directory. Run the following commands from that project root. After relocating
+an existing checkout, regenerate the native CMake build directory because its
+cache records absolute source paths.
 
 Requires Visual Studio 2022 C++ tools, CMake, Vulkan SDK, .NET Framework compiler,
 and the game's Unity / UMM / I2 managed references. Download pinned dependencies:
