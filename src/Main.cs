@@ -132,7 +132,7 @@ namespace DVLSFG {
             }
         }
         static void Draw(UnityModManager.ModEntry entry) {
-            Bind(); GUILayout.Label("DV LSFG 0.4.12 — " + T("实验版本","Experimental"));
+            Bind(); GUILayout.Label("DV LSFG 0.4.13 — " + T("实验版本","Experimental"));
             GUILayout.Label("FSR 1.0: "+FsrRuntime.Status);
             GUILayout.Label(T("前置：已启用的 DVVulkan；仅支持非 VR、SDR。","Requires active DVVulkan; non-VR SDR only."));
             if(loaded) {

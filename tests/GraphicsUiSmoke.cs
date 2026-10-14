@@ -130,7 +130,7 @@ namespace DVLSFGTests {
                     if(rows[2].GetLabelTMPro().text!="帧生成模型" && rows[2].GetLabelTMPro().text!="Frame generation model") throw new Exception("Model label incorrect");
                     if(rows[1].GetComponent<UIElementTooltip>().GetText().Contains("短暂停顿") || rows[1].GetComponent<UIElementTooltip>().GetText().Contains("without restarting")) throw new Exception("Removed multiplier note remains");
                     entry.Logger.Log("DESCRIPTION PASS: native footer, two-line live model help, generation labels, LSFG status, FSR rendering/output, no redundant apply timing notes");
-                    var settingsFile=Path.GetFullPath(Path.Combine(entry.Path,"..","DVLSFG","config.ini"));
+                    var settingsFile=Path.GetFullPath(Path.Combine(entry.Path,"..","dv-scaling","config.ini"));
                     var previous=File.ReadAllText(settingsFile);
                     try {
                         int old=rows[1].SelectedIndex; int next=(old+1)%3;
@@ -214,7 +214,7 @@ namespace DVLSFGTests {
                     }
                     liveStep++; deadline=DateTime.UtcNow.AddSeconds(3);
                 } else if(stage==3) {
-                    File.WriteAllText(Path.GetFullPath(Path.Combine(entry.Path,"..","DVLSFG","capture.request")),"capture");
+                    File.WriteAllText(Path.GetFullPath(Path.Combine(entry.Path,"..","dv-scaling","capture.request")),"capture");
                     File.WriteAllText(Path.Combine(entry.Path,"advanced.ready"),"Advanced reference capture requested");
                     stage=4;
                 } else if(stage==4 && File.Exists(Path.Combine(entry.Path,"graphics.request"))) {
@@ -225,7 +225,7 @@ namespace DVLSFGTests {
                     }
                     stage=5; deadline=DateTime.UtcNow.AddSeconds(3);
                 } else if(stage==5) {
-                    File.WriteAllText(Path.GetFullPath(Path.Combine(entry.Path,"..","DVLSFG","capture.request")),"capture"); stage=-1;
+                    File.WriteAllText(Path.GetFullPath(Path.Combine(entry.Path,"..","dv-scaling","capture.request")),"capture"); stage=-1;
                 }
             } catch(Exception e) { entry.Logger.Error(e.ToString()); File.WriteAllText(Path.Combine(entry.Path,"failed.txt"),e.ToString()); stage=-1; }
         }

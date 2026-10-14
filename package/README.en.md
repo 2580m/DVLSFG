@@ -1,4 +1,8 @@
-# DV LSFG 0.4.12 (experimental)
+# DV LSFG 0.4.13 (experimental)
+
+0.4.13 changes the installation directory and archive root to `Mods/dv-scaling`.
+Move the entire old `Mods/DVLSFG` directory to retain configuration when migrating;
+avoid keeping duplicate installations.
 
 0.4.12 adds Ultra Performance (one third of output width and height). Quality
 increases left-to-right: Ultra Performance, Performance, Balanced, Quality, Ultra Quality.

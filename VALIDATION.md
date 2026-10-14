@@ -1,5 +1,18 @@
 # DVLSFG validation record
 
+## 0.4.13 installation directory
+
+The package root and installed directory are dv-scaling. The bootstrap selects
+this directory, retaining a legacy DVLSFG fallback. Deployment validation accepts
+both known paths; UMM identity remains DVLSFG to preserve enablement and dependency
+references. Launcher and UI fixture paths now use dv-scaling.
+Deployment safety checks, automatic bootstrap activation/guards/recovery and
+launcher checks passed against the new installation path. Existing configuration
+is retained when migrating the whole directory.
+The installed game launched through the desktop shortcut with automatic LSFG
+enabled from dv-scaling. Graphics UI and live settings checks passed.
+Evidence: build/directory-ui.log and build/directory-ui-fixture/passed.txt.
+
 ## 0.4.12 Ultra Performance upscaling
 
 Adds mode 5 at one third of output width and height; modes 1..4 keep their original

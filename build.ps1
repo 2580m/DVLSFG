@@ -25,7 +25,7 @@ if(-not $SkipNative) {
 }
 $compiler='C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $managed=Join-Path $GameDirectory 'DerailValley_Data/Managed'
-$output=Join-Path $project 'dist/DVLSFG'
+$output=Join-Path $project 'dist/dv-scaling'
 New-Item -ItemType Directory $output -Force | Out-Null
 Copy-Item "$project/package/*" $output -Force -Recurse
 Copy-Item "$project/build/native/Release/DVLSFG.Native.dll" $output -Force
@@ -44,6 +44,6 @@ if($LASTEXITCODE) { throw 'Bootstrap worker compilation failed' }
 & $compiler /nologo /target:exe /platform:x64 /optimize+ "/out:$output\DVLSFG.Launcher.exe" "$project\src\Launcher.cs" "$project\src\Settings.cs"
 if($LASTEXITCODE) { throw 'Launcher compilation failed' }
 $version=(Get-Content "$project/package/Info.json" -Raw | ConvertFrom-Json).Version
-$zip=Join-Path $project "dist/DVLSFG-$version.zip"
+$zip=Join-Path $project "dist/dv-scaling-$version.zip"
 Compress-Archive -Path $output -DestinationPath $zip -Force
 Get-Item $zip | Select-Object FullName,Length

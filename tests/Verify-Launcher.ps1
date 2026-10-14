@@ -2,9 +2,9 @@ param([Parameter(Mandatory=$true)][string]$LosslessDll)
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
 $fixture=Join-Path $project ('build/launcher-' + [Guid]::NewGuid().ToString('N'))
-$mod=Join-Path $fixture 'Mods/DVLSFG'
+$mod=Join-Path $fixture 'Mods/dv-scaling'
 New-Item -ItemType Directory $mod -Force | Out-Null
-Copy-Item "$project/dist/DVLSFG/*" $mod -Force
+Copy-Item "$project/dist/dv-scaling/*" $mod -Force
 New-Item -ItemType Directory "$fixture/Mods/DVVulkan/dxvk" -Force | Out-Null
 foreach($name in @('d3d11.dll','dxgi.dll')) {
     Copy-Item "$project/../DVVulkan/vendor/dxvk-3.1.1/x64/$name" $fixture

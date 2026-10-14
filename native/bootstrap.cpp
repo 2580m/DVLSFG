@@ -42,7 +42,8 @@ void addEnvironment(const wchar_t* variable,const std::wstring& item,bool prepen
 }
 void initialize() {
     wchar_t file[32768]{}; GetModuleFileNameW(self,file,32768);
-    auto root=std::filesystem::path(file).parent_path(); auto mod=root/L"Mods"/L"DVLSFG";
+    auto root=std::filesystem::path(file).parent_path(); auto mod=root/L"Mods"/L"dv-scaling";
+    if(!std::filesystem::exists(mod/L"Info.json")) mod=root/L"Mods"/L"DVLSFG";
     try {
         std::filesystem::path log=std::filesystem::exists(mod)?mod/L"bootstrap.log":root/L"DVLSFG-bootstrap.log";
         std::ofstream output(log,std::ios::trunc);

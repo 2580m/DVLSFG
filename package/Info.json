@@ -2,7 +2,7 @@
   "Id": "DVLSFG",
   "DisplayName": "DV LSFG (experimental)",
   "Author": "BG4JEC; lsfg-vk by PancakeTAS and contributors",
-  "Version": "0.4.12",
+  "Version": "0.4.13",
   "ManagerVersion": "0.27.3",
   "Requirements": ["DVVulkan"],
   "AssemblyName": "DVLSFG.dll",

@@ -6,8 +6,11 @@ namespace DVLSFG {
         public static string Hash(string path) { using(var sha=SHA256.Create()) using(var stream=File.OpenRead(path)) return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-",""); }
         static void ValidateRoot(string root,string mod) {
             root=Path.GetFullPath(root); mod=Path.GetFullPath(mod);
-            if(!File.Exists(Path.Combine(root,"DerailValley.exe")) || !string.Equals(mod.TrimEnd(Path.DirectorySeparatorChar),Path.Combine(root,"Mods","DVLSFG"),StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Bootstrap deployment requires Derail Valley/Mods/DVLSFG");
+            string directory=mod.TrimEnd(Path.DirectorySeparatorChar);
+            bool supported=string.Equals(directory,Path.Combine(root,"Mods","dv-scaling"),StringComparison.OrdinalIgnoreCase)
+                || string.Equals(directory,Path.Combine(root,"Mods","DVLSFG"),StringComparison.OrdinalIgnoreCase);
+            if(!File.Exists(Path.Combine(root,"DerailValley.exe")) || !supported)
+                throw new InvalidOperationException("Bootstrap deployment requires Derail Valley/Mods/dv-scaling");
         }
         public static bool Installed(string root,string mod) {
             string file=Path.Combine(root,"vulkan-1.dll"),payload=Path.Combine(mod,"DVLSFG.Bootstrap.dll");

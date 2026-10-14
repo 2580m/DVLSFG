@@ -6,7 +6,7 @@ class BootstrapDeploymentTests {
     static void Refused(Action action) { try {action();} catch(IOException){return;} throw new Exception("Unsafe deployment accepted"); }
     static int Main(string[] args) {
         string root=Path.Combine(args[0],"deployment-"+Guid.NewGuid().ToString("N"));
-        string mod=Path.Combine(root,"Mods","DVLSFG"),dxvk=Path.Combine(root,"Mods","DVVulkan","dxvk");
+        string mod=Path.Combine(root,"Mods","dv-scaling"),dxvk=Path.Combine(root,"Mods","DVVulkan","dxvk");
         Directory.CreateDirectory(mod); Directory.CreateDirectory(dxvk);
         File.WriteAllText(Path.Combine(root,"DerailValley.exe"),"fixture only");
         foreach(string name in new[]{"d3d11.dll","dxgi.dll"}) {File.WriteAllText(Path.Combine(dxvk,name),name);File.Copy(Path.Combine(dxvk,name),Path.Combine(root,name));}

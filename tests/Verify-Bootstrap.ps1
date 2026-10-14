@@ -2,9 +2,9 @@ param([Parameter(Mandatory=$true)][string]$LosslessDll)
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
 $run=Join-Path $project ('build/bootstrap-' + [Guid]::NewGuid().ToString('N'))
-$mod=Join-Path $run 'Mods/DVLSFG'
+$mod=Join-Path $run 'Mods/dv-scaling'
 New-Item -ItemType Directory $mod -Force | Out-Null
-Copy-Item "$project/dist/DVLSFG/*" $mod -Force
+Copy-Item "$project/dist/dv-scaling/*" $mod -Force
 Copy-Item "$project/build/native/Release/DVLSFG.VulkanHost.exe" "$run/DerailValley.exe"
 Copy-Item "$project/build/native/Release/DVLSFG.VulkanHost.exe" $run
 New-Item -ItemType Directory "$run/Mods/DVVulkan/dxvk" -Force | Out-Null

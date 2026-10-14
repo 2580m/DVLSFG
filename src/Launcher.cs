@@ -19,7 +19,7 @@ namespace DVLSFG {
                 if(probe) return Check(mod,s.DllPath) ? 0 : 1;
                 string root=Path.GetFullPath(Path.Combine(mod,"..",".."));
                 string exe=Path.Combine(root,"DerailValley.exe");
-                if(!File.Exists(exe)) throw new Exception("Install DVLSFG under Derail Valley/Mods/DVLSFG first.");
+                if(!File.Exists(exe)) throw new Exception("Install DVLSFG under Derail Valley/Mods/dv-scaling first.");
                 foreach(var p in Process.GetProcessesByName("DerailValley")) using(p) { throw new Exception("Exit Derail Valley before launching."); }
                 if(!plain) {
                     string umm=Path.Combine(root,"DerailValley_Data","Managed","UnityModManager","Params.xml");

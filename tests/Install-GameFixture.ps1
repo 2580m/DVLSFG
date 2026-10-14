@@ -15,7 +15,7 @@ $arguments=@('/nologo','/target:library','/platform:x64',('/out:'+(Join-Path $fi
 foreach($ref in @('UnityModManager/UnityModManager.dll','UnityModManager/0Harmony.dll','UnityEngine.CoreModule.dll','UnityEngine.PhysicsModule.dll','UnityEngine.ImageConversionModule.dll','UnityEngine.ScreenCaptureModule.dll','UnityEngine.UI.dll','UnityEngine.UIModule.dll','Unity.TextMeshPro.dll','DV.UI.dll','DV.UIFramework.dll')) {
     $arguments+=('/reference:'+(Join-Path $managed $ref).Replace('/','\'))
 }
-$arguments+=('/reference:'+(Join-Path $GameDirectory 'Mods/DVLSFG/DVLSFG.dll').Replace('/','\'))
+$arguments+=('/reference:'+(Join-Path $GameDirectory 'Mods/dv-scaling/DVLSFG.dll').Replace('/','\'))
 $arguments+=(Join-Path $PSScriptRoot ($source+'.cs'))
 & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' @arguments
 if($LASTEXITCODE) {throw 'Fixture compilation failed'}
