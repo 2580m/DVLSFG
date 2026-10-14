@@ -33,8 +33,10 @@ namespace DVLSFG {
             if(!component || gameCameraField==null || !(bool)gameCameraField.GetValue(component)) return;
             var camera=component.GetComponent<Camera>();
             if(camera && !camera.GetComponent<FsrSceneCamera>()) camera.gameObject.AddComponent<FsrSceneCamera>();
+            if(camera && !camera.GetComponent<Fsr3SceneCamera>()) camera.gameObject.AddComponent<Fsr3SceneCamera>().enabled=false;
         }
         internal static void Tick() {
+            Fsr3Runtime.Tick();
             if(!Requested) {wasRequested=false; return;}
             if(SystemInfo.graphicsDeviceType!=GraphicsDeviceType.Direct3D11) {failure="Requires D3D11 / DXVK"; return;}
             if(!attempted) {
@@ -56,6 +58,7 @@ namespace DVLSFG {
         }
         internal static string Status {
             get {
+                if(Main.settings.FsrTechnology==2 && Requested) return Fsr3Runtime.Status;
                 if(!Requested) return L10n.Get("dv_scaling/off");
                 if(failure!=null) return L10n.Get("dv_scaling/unavailable")+failure;
                 foreach(var camera in Cameras) {
@@ -95,7 +98,7 @@ namespace DVLSFG {
         }
         void LateUpdate() {
             try {
-                if(!Scene || !Scene.enabled || Scene.cullingMask==0 || !FsrRuntime.Requested || FsrRuntime.callback==IntPtr.Zero || Scene.stereoEnabled) {Release(); failedMode=-1; error=null; return;}
+                if(!Scene || !Scene.enabled || Scene.cullingMask==0 || !FsrRuntime.Requested || Main.settings.FsrTechnology==2 || FsrRuntime.callback==IntPtr.Zero || Scene.stereoEnabled) {Release(); failedMode=-1; error=null; return;}
                 if(failedMode==Main.settings.FsrMode && failedWidth==Screen.width && failedHeight==Screen.height) return;
                 if(Scene.targetDisplay!=0) {Release(); error="FSR: primary display required"; return;}
                 if(Scene.rect!=new Rect(0,0,1,1)) {Release(); error="FSR: full-screen scene camera required"; return;}
@@ -202,6 +205,11 @@ namespace DVLSFG {
         static bool Prefix(Camera __instance,Vector2 pos,Camera.MonoOrStereoscopicEye eye,ref Ray __result) {
             if(eye!=Camera.MonoOrStereoscopicEye.Mono || !__instance || Screen.width<=0 || Screen.height<=0) return true;
             foreach(var fsr in FsrRuntime.Cameras) {
+                if(!fsr || fsr.Scene!=__instance || !fsr.OwnsSceneTarget) continue;
+                __result=__instance.ViewportPointToRay(new Vector3(pos.x/Screen.width,pos.y/Screen.height,0),eye);
+                return false;
+            }
+            foreach(var fsr in Fsr3Runtime.Cameras) {
                 if(!fsr || fsr.Scene!=__instance || !fsr.OwnsSceneTarget) continue;
                 __result=__instance.ViewportPointToRay(new Vector3(pos.x/Screen.width,pos.y/Screen.height,0),eye);
                 return false;

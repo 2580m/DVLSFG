@@ -15,6 +15,10 @@ class SettingsTests {
             Assert(restored.Enabled && restored.Multiplier==4 && restored.Performance && restored.FlowScale==.5f && restored.DllPath==settings.DllPath,"UTF8/invariant roundtrip failed");
             Assert(!File.Exists(path+".tmp"),"Atomic save left temp file");
             Assert(restored.FsrMode==2 && restored.FsrSharpness==.3f,"FSR persistence failed");
+            Assert(restored.FsrTechnology==1,"Existing FSR configuration did not select FSR1");
+            settings.FsrTechnology=2; settings.Save(path);
+            restored=Settings.Read(path); Assert(restored.FsrTechnology==2 && restored.FsrMode==2,"FSR3 technology persistence failed");
+            settings.FsrTechnology=1;
             settings.FsrMode=0; settings.FsrQuality=4; settings.Save(path);
             restored=Settings.Read(path); Assert(restored.FsrMode==0 && restored.FsrQuality==4,"Off technology lost its quality selection");
             settings.FsrMode=5; settings.Save(path);

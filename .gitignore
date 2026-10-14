@@ -2,4 +2,5 @@
 /dist/
 /vendor/lsfg-vk/
 /vendor/shader-hashes.cpp
+/vendor/FSR3Unity/
 .vscode/settings.json

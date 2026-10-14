@@ -1,5 +1,34 @@
 # DVLSFG validation record
 
+## 0.4.15 FSR 3.1 temporal upscaling
+
+FSR3Unity's actual FSR 3.1 compute backend is ported to Unity 2019.4; it is distinct
+from the FSR1 EASU/RCAS plugin. Shader permutations are fixed for SDR D3D11/DXVK,
+reversed depth and low-resolution motion vectors. GPU checks exposed missing
+scratch UAV bindings in the reference backend, which are supplied by the port.
+The five scratch targets persist per context; shader binding metadata is cached.
+Scene cameras provide jitter, depth/motion, history resets and a full-resolution
+compositor. Components are disabled when unused, avoiding an extra image-effect
+copy in FSR1/off mode. Existing FSR1 configuration retains its mode meanings.
+
+Synthetic GPU checks passed all five quality sizes, nonblack matching color
+readback, sharpening and MSAA/target restoration on Off. UI checks passed immediate
+native AA disabling when FSR3 is selected, Discard restoration, language switching
+and the existing Apply/Discard/live-setting regressions. Real game-world checks
+passed five quality modes, finite nonblack GPU output, enabled depth/motion inputs,
+disabled native MSAA and PPV2 AA in both forward/deferred rendering,
+display-coordinate picking, resizing to 1280x720 and FSR1/3
+transitions. Config is restored after test runs. These checks do not establish
+artifact-free transparent effects or animated foliage; reactive masks/mip bias
+and placement before selected postprocessing remain future improvements.
+
+Evidence: build/fsr3-gpu.log, build/fsr3-gpu-fixture/fsr3-smoke.log,
+build/fsr3-ui.log, build/fsr3-ui-fixture/passed.txt, build/fsr3-world-first-fixture,
+build/fsr3-world-supplement.log and build/fsr3-world-supplement-fixture.
+Final resource-release regression: build/fsr3-final-gpu.log and
+build/fsr3-final-gpu-fixture/passed.txt. The synthetic test releases any FSR3
+active at startup before capturing native AA, avoiding an overridden baseline.
+
 ## 0.4.14 local CSV localization
 
 Moves 62 bilingual UI/status/description terms into the bundled translations.csv.

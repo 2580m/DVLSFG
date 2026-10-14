@@ -34,3 +34,26 @@ postprocessing and before Screen Space Overlay UI. The native plugin executes on
 Unity's render thread on Unity's existing D3D11 device, including DXVK translation.
 It does not replace DVVulkan or create a second FSR rendering device. FSR needs no
 Lossless.dll, extracted LSFG assets, depth, motion vectors, or frame history.
+
+## AMD FSR 3.1 through FSR3Unity
+
+- Repository: https://github.com/ndepoel/FSR3Unity
+- Pinned commit: `71879e71aa72465a79bdf009d7d71f9f7ab83066`
+- Nico de Poel's MIT notice: `FSR3UNITY-LICENSE.txt` in the release.
+- AMD FidelityFX MIT notice: `FSR3-LICENSE.md` in the release.
+
+`Build-Fsr3.ps1` derives Unity 2019-compatible C# from the unmodified source under
+vendor/FSR3Unity. It replaces unavailable compute constant-buffer APIs with global
+constant-buffer bindings, uses immediate buffer uploads supported by this engine,
+and builds fixed SDR/reversed-depth/low-resolution-motion shader permutations.
+Sharpening selects a separate accumulation kernel. `src/Fsr3Compatibility.cs`
+owns persistent per-context scratch textures and supplies missing UAV bindings
+for luminance, shading change, reactivity and accumulation passes.
+
+`native/Fsr3BundleBuilder.cs` builds the compute-only resource bundle with Unity
+2019.4.40f1, enabling the built-in AssetBundle package. The editor is a build tool
+and is not distributed. `src/Fsr3Upscaling.cs` provides jittered scene rendering,
+depth/motion inputs, temporal history/reset, full-resolution composition and AA
+restoration. The integration currently runs after the game's scene postprocessing.
+Automatic reactive masks and material mip-bias adjustments are not enabled;
+transparent effects and animated foliage need further visual evaluation.

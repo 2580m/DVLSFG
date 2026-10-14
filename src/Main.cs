@@ -133,8 +133,8 @@ namespace DVLSFG {
             }
         }
         static void Draw(UnityModManager.ModEntry entry) {
-            Bind(); GUILayout.Label("DV LSFG 0.4.14 — " + L10n.Get("dv_scaling/experimental"));
-            GUILayout.Label("FSR 1.0: "+FsrRuntime.Status);
+            Bind(); GUILayout.Label("DV LSFG 0.4.15 — " + L10n.Get("dv_scaling/experimental"));
+            GUILayout.Label((settings.FsrTechnology==2 ? "FSR 3.1: " : "FSR 1.0: ")+FsrRuntime.Status);
             GUILayout.Label(L10n.Get("dv_scaling/requires_active_dvvulkan_non_vr_sdr_only"));
             if(loaded) {
                 var message=new StringBuilder(4096); ulong real,generated; int active=status(message,4096,out real,out generated);

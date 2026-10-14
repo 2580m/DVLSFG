@@ -3,7 +3,7 @@
 Independent Derail Valley / Unity Mod Manager mod for experimental LSFG 3.1 frame
 generation through a Windows Vulkan layer. Requires DVVulkan with deployed DXVK
 and DV Language Helper (`DVLangHelper`).
-Version 0.4.5 uses native hover descriptions, supports live LSFG multiplier/model/flow changes and game-integrated AMD FSR 1.0 spatial upscaling.
+Version 0.4.15 adds real AMD FSR 3.1 temporal upscaling alongside FSR 1.0 spatial upscaling. Selecting FSR 3.1 immediately disables native AA controls; switching away restores native AA. Native hover descriptions and live LSFG multiplier/model/flow changes remain supported.
 FSR reduces scene-camera rendering resolution, preserves screen output resolution,
 and runs before the existing LSFG presentation path. Both controls use native Apply/Discard.
 UMM automatically installs a game-local Vulkan bootstrap. After the first restart,
@@ -29,12 +29,15 @@ and the game's Unity / UMM / I2 managed references. Download pinned dependencies
 ```
 
 `port.ps1` generates the Win32 port under `build/port`; edit the transformation or
-native sources, not generated files. The archive is `dist/dv-scaling-0.4.14.zip`.
+native sources, not generated files. The archive is `dist/dv-scaling-0.4.15.zip`.
 The bootstrap generator reads the local system loader's export names/ordinals and
 builds x64 argument-preserving forwarding stubs; no system loader binary is bundled.
 No Lossless.dll, extracted LSFG shaders or user model paths are distributed.
-FSR1's MIT-licensed shaders are compiled and embedded at build time. Building FSR
-also requires Windows SDK FXC; no Unity editor or user-side shader compiler is needed.
+FSR1's MIT-licensed shaders are compiled with Windows SDK FXC at build time.
+FSR3 additionally needs a Unity 2019.4.40f1 editor to build its resource bundle:
+run `Build-Fsr3.ps1 -UnityEditor <path-to-Unity.exe>` before packaging. The shader
+variants target non-VR SDR D3D11/DXVK. Runtime C# is compiled with VS 2022 Roslyn.
+The installed mod requires no editor or shader compiler.
 
 ## Translations
 

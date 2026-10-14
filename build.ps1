@@ -23,11 +23,19 @@ if(-not $SkipNative) {
     & $CMake --build "$project/build/native" --config Release --parallel 6
     if($LASTEXITCODE) { throw 'Native compilation failed' }
 }
-$compiler='C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+$vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+$vsPath=& $vswhere -latest -products '*' -property installationPath
+$compiler=Join-Path $vsPath 'MSBuild/Current/Bin/Roslyn/csc.exe'
+& "$project/Build-Fsr3.ps1" -SkipShaders
+if(-not $SkipNative -or -not (Test-Path "$project/build/fsr3/bundle/dv-scaling-fsr3")) { & "$project/Build-Fsr3.ps1" }
+$fsr3Sources=(Get-ChildItem "$project/build/fsr3/runtime" -Filter '*.cs').FullName
 $managed=Join-Path $GameDirectory 'DerailValley_Data/Managed'
 $output=Join-Path $project 'dist/dv-scaling'
 New-Item -ItemType Directory $output -Force | Out-Null
 Copy-Item "$project/package/*" $output -Force -Recurse
+Copy-Item "$project/build/fsr3/bundle/dv-scaling-fsr3" $output -Force
+Copy-Item "$project/vendor/FSR3Unity/LICENSE.txt" "$output/FSR3UNITY-LICENSE.txt" -Force
+Copy-Item "$project/vendor/FSR3Unity/Packages/fidelityfx.fsr/LICENSE.md" "$output/FSR3-LICENSE.md" -Force
 Copy-Item "$project/build/native/Release/DVLSFG.Native.dll" $output -Force
 Copy-Item "$project/build/native/Release/DVLSFG.Bootstrap.dll" $output -Force
 Copy-Item "$project/build/native/Release/DVLSFG.FSR.dll" $output -Force
@@ -37,7 +45,7 @@ Copy-Item "$project/vendor/lsfg-vk/thirdparty/dxbc/LICENSE.md" "$output/DXBC-LIC
 Copy-Item "$project/vendor/lsfg-vk/thirdparty/volk/LICENSE.md" "$output/VOLK-LICENSE.md" -Force
 Copy-Item "$project/UPSTREAM.md" $output -Force
 Copy-Item "$project/VALIDATION.md" $output -Force
-& $compiler /nologo /target:library /platform:x64 /optimize+ "/out:$output\DVLSFG.dll" "/reference:$managed\UnityModManager\UnityModManager.dll" "/reference:$managed\UnityModManager\0Harmony.dll" "/reference:$managed\UnityEngine.CoreModule.dll" "/reference:$managed\UnityEngine.IMGUIModule.dll" "/reference:$managed\UnityEngine.UIModule.dll" "/reference:$managed\UnityEngine.TextRenderingModule.dll" "/reference:$managed\UnityEngine.UI.dll" "/reference:$managed\Unity.TextMeshPro.dll" "/reference:$managed\DV.UI.dll" "/reference:$managed\DV.UIFramework.dll" "/reference:$managed\I2.Localization.dll" "/reference:$managed\DV.Localization.dll" "/reference:$GameDirectory\Mods\DVLangHelper\DVLangHelper.Runtime.dll" "/reference:$GameDirectory\Mods\DVLangHelper\DVLangHelper.Data.dll" "$project\src\Localization.cs" "$project\src\FsrUpscaling.cs" "$project\src\Main.cs" "$project\src\Settings.cs" "$project\src\GraphicsSettings.cs" "$project\src\AutoStartup.cs" "$project\src\BootstrapDeployment.cs"
+& $compiler /nologo /target:library /platform:x64 /optimize+ /langversion:8 "/out:$output\DVLSFG.dll" "/reference:$managed\UnityModManager\UnityModManager.dll" "/reference:$managed\UnityModManager\0Harmony.dll" "/reference:$managed\UnityEngine.CoreModule.dll" "/reference:$managed\UnityEngine.IMGUIModule.dll" "/reference:$managed\UnityEngine.UIModule.dll" "/reference:$managed\UnityEngine.TextRenderingModule.dll" "/reference:$managed\UnityEngine.UI.dll" "/reference:$managed\Unity.TextMeshPro.dll" "/reference:$managed\DV.UI.dll" "/reference:$managed\DV.UIFramework.dll" "/reference:$managed\I2.Localization.dll" "/reference:$managed\Unity.Postprocessing.Runtime.dll" "/reference:$managed\UnityEngine.AssetBundleModule.dll" "/reference:$managed\DV.Localization.dll" "/reference:$GameDirectory\Mods\DVLangHelper\DVLangHelper.Runtime.dll" "/reference:$GameDirectory\Mods\DVLangHelper\DVLangHelper.Data.dll" "$project\src\Localization.cs" "$project\src\FsrUpscaling.cs" "$project\src\Fsr3Upscaling.cs" "$project\src\Fsr3Compatibility.cs" @fsr3Sources "$project\src\Main.cs" "$project\src\Settings.cs" "$project\src\GraphicsSettings.cs" "$project\src\AutoStartup.cs" "$project\src\BootstrapDeployment.cs"
 if($LASTEXITCODE) { throw 'UMM compilation failed' }
 & $compiler /nologo /target:exe /platform:x64 /optimize+ "/out:$output\DVLSFG.BootstrapWorker.exe" "$project\src\BootstrapWorker.cs" "$project\src\BootstrapDeployment.cs"
 if($LASTEXITCODE) { throw 'Bootstrap worker compilation failed' }

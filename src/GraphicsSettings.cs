@@ -24,9 +24,23 @@ namespace DVLSFG {
         float statusTimer;
         ScrollRect graphicsScroll;
         bool graphicsVisible;
+        readonly Dictionary<Selector,bool> antialiasingControls=new Dictionary<Selector,bool>();
+        void UpdateAntialiasingControls() {
+            bool disable=Main.modEntry.Active && pending!=null && pending.FsrMode>0 && pending.FsrTechnology==2;
+            if(disable && antialiasingControls.Count==0) {
+                foreach(var binding in controller.GetComponentsInChildren<SettingChangeSourceSelector>(true)) {
+                    string preference=AccessTools.Field(typeof(SettingChangeSource),"preferencesName").GetValue(binding) as string;
+                    if((preference ?? binding.name).IndexOf("AntiAliasing",StringComparison.OrdinalIgnoreCase)<0) continue;
+                    var selector=binding.GetComponent<Selector>();
+                    if(selector) antialiasingControls[selector]=selector.IsInteractable;
+                }
+            }
+            foreach(var control in antialiasingControls) if(control.Key && control.Key.IsInteractable!=(disable ? false : control.Value)) control.Key.ToggleInteractable(disable ? false : control.Value);
+            if(!disable) antialiasingControls.Clear();
+        }
         static int Quality(Settings s) { return s.FsrMode>0 ? s.FsrMode : s.FsrQuality; }
-        static Settings Copy(Settings s) { return new Settings { Enabled=s.Enabled,DllPath=s.DllPath,Multiplier=s.Multiplier,Performance=s.Performance,FlowScale=s.FlowScale,FsrMode=s.FsrMode,FsrQuality=Quality(s),FsrSharpness=s.FsrSharpness }; }
-        internal bool Dirty { get { return pending!=null && (pending.Enabled!=Main.settings.Enabled || pending.Multiplier!=Main.settings.Multiplier || pending.Performance!=Main.settings.Performance || pending.FlowScale!=Main.settings.FlowScale || pending.FsrMode!=Main.settings.FsrMode || Quality(pending)!=Quality(Main.settings) || pending.FsrSharpness!=Main.settings.FsrSharpness); } }
+        static Settings Copy(Settings s) { return new Settings { Enabled=s.Enabled,DllPath=s.DllPath,Multiplier=s.Multiplier,Performance=s.Performance,FlowScale=s.FlowScale,FsrMode=s.FsrMode,FsrTechnology=s.FsrTechnology,FsrQuality=Quality(s),FsrSharpness=s.FsrSharpness }; }
+        internal bool Dirty { get { return pending!=null && (pending.Enabled!=Main.settings.Enabled || pending.Multiplier!=Main.settings.Multiplier || pending.Performance!=Main.settings.Performance || pending.FlowScale!=Main.settings.FlowScale || pending.FsrMode!=Main.settings.FsrMode || pending.FsrTechnology!=Main.settings.FsrTechnology || Quality(pending)!=Quality(Main.settings) || pending.FsrSharpness!=Main.settings.FsrSharpness); } }
         void Start() {
             controller=GetComponent<SettingsController>();
             try {
@@ -97,6 +111,7 @@ namespace DVLSFG {
                 case 3:
                     return L10n.Get("dv_scaling/adjust_optical_flow_resolution_higher_values_retain_more_mot");
                 case 6:
+                    if(pending.FsrTechnology==2 && pending.FsrMode>0) return L10n.Get("dv_scaling/fsr3_description")+FsrRuntime.Status;
                     return L10n.Get("dv_scaling/choose_an_upscaling_technology_fsr_1_0_uses_fidelityfx_super")+FsrRuntime.Status;
                 case 7:
                     return L10n.Get("dv_scaling/adjust_sharpening_after_fsr_upscaling_0_disables_sharpening")+FsrRuntime.Status;
@@ -238,6 +253,7 @@ namespace DVLSFG {
             statusTimer+=Time.unscaledDeltaTime;
             if(language!=current || statusTimer>=1f) { statusTimer=0; Refresh(); }
             foreach(var control in controls) if(control) control.SetActive(Main.modEntry.Active);
+            UpdateAntialiasingControls();
         }
         void Change(int field,int index) {
             if(syncing || pending==null) return;
@@ -246,7 +262,7 @@ namespace DVLSFG {
                 case 1: pending.Multiplier=index+2; break;
                 case 2: pending.Performance=index==1; break;
                 case 3: pending.FlowScale=new float[]{.25f,.5f,.75f,1f}[index]; break;
-                case 6: pending.FsrMode=index==0 ? 0 : pending.FsrQuality; break;
+                case 6: pending.FsrTechnology=index; pending.FsrMode=index==0 ? 0 : pending.FsrQuality; break;
                 case 8: pending.FsrQuality=5-index; if(pending.FsrMode>0) pending.FsrMode=pending.FsrQuality; break;
                 default: return;
             }
@@ -265,9 +281,10 @@ namespace DVLSFG {
                 Set(2,L10n.Get("dv_scaling/frame_generation_model"),new List<string>{L10n.Get("dv_scaling/standard"),L10n.Get("dv_scaling/performance")},pending.Performance?1:0,pending.Enabled);
                 int scale=Mathf.Clamp(Mathf.RoundToInt(pending.FlowScale*4)-1,0,3);
                 Set(3,L10n.Get("dv_scaling/optical_flow_quality"),new List<string>{"25%","50%","75%","100%"},scale,pending.Enabled);
-                Set(6,L10n.Get("dv_scaling/upscaling_technology"),new List<string>{L10n.Get("dv_scaling/off"),"FSR 1.0"},pending.FsrMode>0 ? 1 : 0,true);
+                Set(6,L10n.Get("dv_scaling/upscaling_technology"),new List<string>{L10n.Get("dv_scaling/off"),"FSR 1.0","FSR 3.1"},pending.FsrMode==0 ? 0 : pending.FsrTechnology==2 ? 2 : 1,true);
                 Set(8,L10n.Get("dv_scaling/upscaling_quality"),new List<string>{L10n.Get("dv_scaling/ultra_performance"),L10n.Get("dv_scaling/performance"),L10n.Get("dv_scaling/balanced"),L10n.Get("dv_scaling/quality"),L10n.Get("dv_scaling/ultra_quality")},5-Quality(pending),pending.FsrMode>0);
                 sharpnessSlider.ToggleInteractable(pending.FsrMode>0);
+                UpdateAntialiasingControls();
                 sharpnessLabel.text=L10n.Get("dv_scaling/sharpening");
                 int percent=Mathf.RoundToInt(pending.FsrSharpness*100);
                 sharpnessSlider.SetValueWithoutNotify(percent);

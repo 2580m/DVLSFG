@@ -90,6 +90,21 @@ namespace DVLSFGTests {
                         }
                     }
                 } else if(stage==2) {
+                    var aaControls=new System.Collections.Generic.Dictionary<Selector,bool>();
+                    foreach(var binding in controller.GetComponentsInChildren<SettingChangeSourceSelector>(true)) {
+                        string preference=AccessTools.Field(typeof(SettingChangeSource),"preferencesName").GetValue(binding) as string;
+                        entry.Logger.Log("NATIVE SELECTOR: "+binding.name+" preference="+preference);
+                        if((preference ?? binding.name).IndexOf("AntiAliasing",StringComparison.OrdinalIgnoreCase)<0) continue;
+                        var selector=binding.GetComponent<Selector>(); if(selector) aaControls[selector]=selector.IsInteractable;
+                    }
+                    if(aaControls.Count==0) throw new Exception("Native antialiasing selector not found");
+                    int originalTechnology=rows[6].SelectedIndex;
+                    rows[6].SetSelectedIndex(2,true);
+                    foreach(var control in aaControls) if(control.Key.IsInteractable) throw new Exception("FSR3 did not disable native antialiasing immediately");
+                    ((Button)AccessTools.Field(typeof(SettingsController),"revertChanges").GetValue(controller)).onClick.Invoke();
+                    if(rows[6].SelectedIndex!=originalTechnology) throw new Exception("FSR3 technology discard failed");
+                    foreach(var control in aaControls) if(control.Key.IsInteractable!=control.Value) throw new Exception("FSR3 discard did not restore native antialiasing");
+                    entry.Logger.Log("FSR3 UI PASS: technology selection immediately disables native antialiasing; Discard restores availability");
                     string originalLanguage=LocalizationManager.CurrentLanguage;
                     try {
                         foreach(string language in new[]{"English","Chinese (Simplified)","German"}) {

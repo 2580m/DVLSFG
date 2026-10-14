@@ -1,4 +1,10 @@
-# DV LSFG 0.4.14 (experimental)
+# DV LSFG 0.4.15 (experimental)
+
+0.4.15 adds FSR 3.1 temporal upscaling with depth, motion vectors, projection
+jitter and frame history. Selecting it immediately disables native AA controls;
+Apply replaces native AA, and switching back/off restores its previous settings.
+Five quality modes and sharpening remain available. This integration runs after
+scene postprocessing; transparent effects and animated foliage need more visual testing.
 
 0.4.14 moves interface text to a bundled local `translations.csv` through DV Language
 Helper. Install and enable DVLangHelper. Language follows the game and helper
@@ -48,8 +54,8 @@ panels no longer perform periodic refreshes. Existing FSR/LSFG settings are reta
 
 ## FSR 1.0 upscaling
 
-Select FSR 1.0 upscaling in the native Graphics menu and Apply. Modes are Off,
-Ultra Quality, Quality, Balanced and Performance, with 0–100% sharpening. Zero
+Select FSR 1.0 under Upscaling technology in the native Graphics menu and Apply. Quality modes are
+Ultra Performance, Performance, Balanced, Quality and Ultra Quality, with 0–100% sharpening. Zero
 disables RCAS. FSR settings apply without restarting; start with Quality/Ultra
 Quality and 20% sharpening. FSR is disabled by default and independent of LSFG.
 
