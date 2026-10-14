@@ -103,9 +103,11 @@ namespace DVLSFG {
         internal string Description(int field) {
             switch(field) {
                 case 0:
-                    if(pending.FrameGenerationTechnology==2 && pending.Enabled) return L10n.Get("dv_scaling/fsr_fg_description")+(failure ?? Main.GraphicsStatus)+(Dirty ? L10n.Get("dv_scaling/unapplied_changes") : "");
-                    return L10n.Get("dv_scaling/generate_intermediate_frames_with_lsfg_restart_when_first_en")
-                        +(failure ?? Main.GraphicsStatus)+(Dirty ? L10n.Get("dv_scaling/unapplied_changes") : "");
+                    if(!pending.Enabled) return L10n.Get("dv_scaling/frame_generation_description_off");
+                    string generationStatus=failure ?? Main.GraphicsStatus;
+                    if(generationStatus==L10n.Get("dv_scaling/no_frames_generated_yet")) generationStatus="";
+                    return L10n.Get(pending.FrameGenerationTechnology==2 ? "dv_scaling/fsr_fg_description" : "dv_scaling/generate_intermediate_frames_with_lsfg_restart_when_first_en")
+                        +(generationStatus.Length>0 ? "\n"+generationStatus : "")+(Dirty ? L10n.Get("dv_scaling/unapplied_changes") : "");
                 case 1:
                     if(pending.FrameGenerationTechnology==2) return L10n.Get("dv_scaling/fsr_fg_fixed_multiplier");
                     return L10n.Get("dv_scaling/target_2_3_or_4_times_the_original_frame_rate_actual_output");
