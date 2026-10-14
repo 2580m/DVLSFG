@@ -710,3 +710,18 @@ upscaling disabled, Discard restoration, localization, blank-area scrolling,
 Apply/Discard persistence and original LSFG live model/flow switching. The
 launcher fixture also confirmed FSR starts with an empty Lossless.dll path;
 LSFG probing and existing recovery/conflict checks remained valid.
+## Upscaling technology names and bounded value marquee
+
+Inspected the native `DV.UI.Selector` implementation and live TMP settings. The
+native value uses fixed 22-point text with Ellipsis, without scrolling. Its
+preferred-width layout compressed the Chinese title to "超分辨..." when the new
+FidelityFX name required 291 units in a 240-unit value area. The custom upscaling
+selector now reserves the complete localized title and keeps native arrow padding.
+Long values use two copies inside a RectMask2D viewport, with an initial pause
+and continuous leftward motion; short values retain native right alignment.
+
+The game fixture verified the exact FidelityFX™ Super Resolution / AMD FSR 3.1
+names, complete title, bounded scrolling, 18.22-unit title gap, 8-unit arrow gap
+and a 200.02-unit value viewport in the tested layout. Movement and short-name
+reset assertions passed. Screenshots confirmed that text stays inside the value
+area and the title/arrows remain clear. Test choices were not applied.

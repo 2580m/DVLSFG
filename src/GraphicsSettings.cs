@@ -81,6 +81,7 @@ namespace DVLSFG {
                         row.transform.SetSiblingIndex(controls.Count);
                         row.SetActive(true);
                         selector.LocalizedLabel=false; selector.LocalizedValues=false;
+                        if(i==6) row.AddComponent<GraphicsValueMarquee>().Configure(selector);
                         int field=i;
                         selector.SelectionChanged+=delegate(IClickable source,int index) { Change(field,index); };
                         rows.Add(selector);
@@ -286,7 +287,7 @@ namespace DVLSFG {
                 Set(2,L10n.Get("dv_scaling/frame_generation_model"),new List<string>{L10n.Get("dv_scaling/standard"),L10n.Get("dv_scaling/performance")},pending.Performance?1:0,lsfg);
                 int scale=Mathf.Clamp(Mathf.RoundToInt(pending.FlowScale*4)-1,0,3);
                 Set(3,L10n.Get("dv_scaling/optical_flow_quality"),new List<string>{"25%","50%","75%","100%"},scale,lsfg);
-                Set(6,L10n.Get("dv_scaling/upscaling_technology"),new List<string>{L10n.Get("dv_scaling/off"),"FSR 1.0","FSR 3.1"},pending.FsrMode==0 ? 0 : pending.FsrTechnology==2 ? 2 : 1,true);
+                Set(6,L10n.Get("dv_scaling/upscaling_technology"),new List<string>{L10n.Get("dv_scaling/off"),"FidelityFX™ Super Resolution","AMD FSR 3.1"},pending.FsrMode==0 ? 0 : pending.FsrTechnology==2 ? 2 : 1,true);
                 Set(8,L10n.Get("dv_scaling/upscaling_quality"),new List<string>{L10n.Get("dv_scaling/ultra_performance"),L10n.Get("dv_scaling/performance"),L10n.Get("dv_scaling/balanced"),L10n.Get("dv_scaling/quality"),L10n.Get("dv_scaling/ultra_quality")},5-Quality(pending),pending.FsrMode>0);
                 sharpnessSlider.ToggleInteractable(pending.FsrMode>0);
                 UpdateAntialiasingControls();
@@ -313,6 +314,66 @@ namespace DVLSFG {
                 var button=AccessTools.Field(typeof(SettingsController),name).GetValue(controller) as Button;
                 if(button) button.interactable=true;
             }
+        }
+    }
+    // Keep the native label and arrow padding; only the option value scrolls.
+    public sealed class GraphicsValueMarquee : MonoBehaviour {
+        TMPro.TextMeshProUGUI text,label,repeat;
+        RectTransform viewport;
+        LayoutElement labelLayout;
+        HorizontalLayoutGroup group;
+        TMPro.TextAlignmentOptions originalAlignment;
+        string previousText;
+        float previousWidth=-1,elapsed;
+        public bool IsScrolling {get; private set;}
+        public RectTransform Viewport {get {return viewport;}}
+        public void Configure(Selector selector) {
+            text=(TMPro.TextMeshProUGUI)AccessTools.Field(typeof(Selector),"valueTMPro").GetValue(selector);
+            label=selector.GetLabelTMPro();
+            var parent=text.transform.parent;
+            group=parent.GetComponent<HorizontalLayoutGroup>();
+            if(!group) throw new InvalidOperationException("Native selector text layout unavailable");
+            originalAlignment=text.alignment;
+            var go=new GameObject("DV Scaling option value viewport",typeof(RectTransform),typeof(RectMask2D),typeof(LayoutElement));
+            viewport=(RectTransform)go.transform; viewport.SetParent(parent,false); viewport.SetSiblingIndex(text.transform.GetSiblingIndex());
+            var layout=go.GetComponent<LayoutElement>(); layout.minWidth=0; layout.preferredWidth=0; layout.flexibleWidth=1;
+            labelLayout=label.GetComponent<LayoutElement>(); if(!labelLayout) labelLayout=label.gameObject.AddComponent<LayoutElement>();
+            labelLayout.flexibleWidth=0; group.childForceExpandWidth=false; group.spacing=Mathf.Max(group.spacing,18);
+            text.transform.SetParent(viewport,false);
+            repeat=Instantiate(text.gameObject,viewport,false).GetComponent<TMPro.TextMeshProUGUI>(); repeat.name="Scrolling value repeat";
+            text.enableAutoSizing=false; text.enableWordWrapping=false; text.overflowMode=TMPro.TextOverflowModes.Overflow; text.raycastTarget=false;
+            repeat.enableAutoSizing=false; repeat.enableWordWrapping=false; repeat.overflowMode=TMPro.TextOverflowModes.Overflow; repeat.raycastTarget=false;
+            foreach(var value in new[]{text,repeat}) {var rt=value.rectTransform; rt.anchorMin=rt.anchorMax=new Vector2(0,.5f); rt.pivot=new Vector2(0,.5f); rt.anchoredPosition=Vector2.zero;}
+            repeat.gameObject.SetActive(false);
+        }
+        void OnEnable() {previousText=null; elapsed=0;}
+        void LateUpdate() {
+            if(!text || !viewport || !label) return;
+            float labelWidth=label.GetPreferredValues(label.text).x;
+            if(Mathf.Abs(labelLayout.preferredWidth-labelWidth)>.1f) {
+                labelLayout.minWidth=labelLayout.preferredWidth=labelWidth;
+                LayoutRebuilder.MarkLayoutForRebuild(group.transform as RectTransform);
+            }
+            float width=viewport.rect.width;
+            if(width<=1) return;
+            if(previousText!=text.text || Mathf.Abs(previousWidth-width)>.1f) {previousText=text.text; previousWidth=width; elapsed=0;}
+            float preferred=text.GetPreferredValues(text.text).x+4;
+            IsScrolling=preferred>width+.5f;
+            text.rectTransform.sizeDelta=new Vector2(IsScrolling ? preferred : width,viewport.rect.height);
+            text.alignment=IsScrolling ? TMPro.TextAlignmentOptions.Left : originalAlignment;
+            repeat.gameObject.SetActive(IsScrolling);
+            if(!IsScrolling) {text.rectTransform.anchoredPosition=Vector2.zero; return;}
+            repeat.text=text.text;
+            if(repeat.color!=text.color) repeat.color=text.color;
+            if(repeat.font!=text.font) repeat.font=text.font;
+            if(repeat.fontSize!=text.fontSize) repeat.fontSize=text.fontSize;
+            repeat.alignment=text.alignment;
+            repeat.rectTransform.sizeDelta=text.rectTransform.sizeDelta;
+            elapsed+=Mathf.Min(Time.unscaledDeltaTime,.1f);
+            float cycle=preferred+32;
+            float offset=Mathf.Max(0,elapsed-1)*30%cycle;
+            text.rectTransform.anchoredPosition=new Vector2(-offset,0);
+            repeat.rectTransform.anchoredPosition=new Vector2(cycle-offset,0);
         }
     }
     public sealed class GraphicsSettingsTooltip : UIElementTooltipCustomText {
