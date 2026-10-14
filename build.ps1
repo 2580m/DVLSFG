@@ -6,6 +6,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $project=$PSScriptRoot
+& "$project/tests/Validate-Translations.ps1" -GameDirectory $GameDirectory
 if(-not $CMake) {
     $candidate=Get-Command cmake -ErrorAction SilentlyContinue
     if($candidate) { $CMake=$candidate.Source }

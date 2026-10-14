@@ -116,8 +116,9 @@ namespace DVLSFG {
                     if(pending.FrameGenerationTechnology==2) return L10n.Get("dv_scaling/fsr_fg_lsfg_only");
                     return L10n.Get("dv_scaling/adjust_optical_flow_resolution_higher_values_retain_more_mot");
                 case 6:
+                    if(pending.FsrMode==0) return L10n.Get("dv_scaling/choose_upscaling_technology");
                     if(pending.FsrTechnology==2 && pending.FsrMode>0) return L10n.Get("dv_scaling/fsr3_description")+FsrRuntime.Status;
-                    return L10n.Get("dv_scaling/choose_an_upscaling_technology_fsr_1_0_uses_fidelityfx_super")+FsrRuntime.Status;
+                    return L10n.Get("dv_scaling/fsr1_description");
                 case 7:
                     return L10n.Get("dv_scaling/adjust_sharpening_after_fsr_upscaling_0_disables_sharpening")+FsrRuntime.Status;
                 case 8:
@@ -318,6 +319,7 @@ namespace DVLSFG {
     }
     // Keep the native label and arrow padding; only the option value scrolls.
     public sealed class GraphicsValueMarquee : MonoBehaviour {
+        Selector selector;
         TMPro.TextMeshProUGUI text,label,repeat;
         RectTransform viewport;
         LayoutElement labelLayout;
@@ -328,6 +330,7 @@ namespace DVLSFG {
         public bool IsScrolling {get; private set;}
         public RectTransform Viewport {get {return viewport;}}
         public void Configure(Selector selector) {
+            this.selector=selector;
             text=(TMPro.TextMeshProUGUI)AccessTools.Field(typeof(Selector),"valueTMPro").GetValue(selector);
             label=selector.GetLabelTMPro();
             var parent=text.transform.parent;
@@ -358,11 +361,12 @@ namespace DVLSFG {
             if(width<=1) return;
             if(previousText!=text.text || Mathf.Abs(previousWidth-width)>.1f) {previousText=text.text; previousWidth=width; elapsed=0;}
             float preferred=text.GetPreferredValues(text.text).x+4;
-            IsScrolling=preferred>width+.5f;
-            text.rectTransform.sizeDelta=new Vector2(IsScrolling ? preferred : width,viewport.rect.height);
-            text.alignment=IsScrolling ? TMPro.TextAlignmentOptions.Left : originalAlignment;
+            bool overflow=preferred>width+.5f;
+            IsScrolling=overflow && selector && selector.IsMouseOvered;
+            text.rectTransform.sizeDelta=new Vector2(overflow ? preferred : width,viewport.rect.height);
+            text.alignment=overflow ? TMPro.TextAlignmentOptions.Left : originalAlignment;
             repeat.gameObject.SetActive(IsScrolling);
-            if(!IsScrolling) {text.rectTransform.anchoredPosition=Vector2.zero; return;}
+            if(!IsScrolling) {elapsed=0; text.rectTransform.anchoredPosition=Vector2.zero; return;}
             repeat.text=text.text;
             if(repeat.color!=text.color) repeat.color=text.color;
             if(repeat.font!=text.font) repeat.font=text.font;
