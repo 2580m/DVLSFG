@@ -1,8 +1,8 @@
 {
   "Id": "DVLSFG",
   "DisplayName": "DV LSFG (experimental)",
-  "Author": "DVLSFG contributors; lsfg-vk by PancakeTAS and contributors",
-  "Version": "0.4.6",
+  "Author": "BG4JEC; lsfg-vk by PancakeTAS and contributors",
+  "Version": "0.4.12",
   "ManagerVersion": "0.27.3",
   "Requirements": ["DVVulkan"],
   "AssemblyName": "DVLSFG.dll",

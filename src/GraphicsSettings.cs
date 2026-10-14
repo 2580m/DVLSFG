@@ -27,8 +27,9 @@ namespace DVLSFG {
         internal static string Text(string zh,string en) {
             return (LocalizationManager.CurrentLanguageCode ?? "").StartsWith("zh",StringComparison.OrdinalIgnoreCase) ? zh : en;
         }
-        static Settings Copy(Settings s) { return new Settings { Enabled=s.Enabled,DllPath=s.DllPath,Multiplier=s.Multiplier,Performance=s.Performance,FlowScale=s.FlowScale,FsrMode=s.FsrMode,FsrSharpness=s.FsrSharpness }; }
-        internal bool Dirty { get { return pending!=null && (pending.Enabled!=Main.settings.Enabled || pending.Multiplier!=Main.settings.Multiplier || pending.Performance!=Main.settings.Performance || pending.FlowScale!=Main.settings.FlowScale || pending.FsrMode!=Main.settings.FsrMode || pending.FsrSharpness!=Main.settings.FsrSharpness); } }
+        static int Quality(Settings s) { return s.FsrMode>0 ? s.FsrMode : s.FsrQuality; }
+        static Settings Copy(Settings s) { return new Settings { Enabled=s.Enabled,DllPath=s.DllPath,Multiplier=s.Multiplier,Performance=s.Performance,FlowScale=s.FlowScale,FsrMode=s.FsrMode,FsrQuality=Quality(s),FsrSharpness=s.FsrSharpness }; }
+        internal bool Dirty { get { return pending!=null && (pending.Enabled!=Main.settings.Enabled || pending.Multiplier!=Main.settings.Multiplier || pending.Performance!=Main.settings.Performance || pending.FlowScale!=Main.settings.FlowScale || pending.FsrMode!=Main.settings.FsrMode || Quality(pending)!=Quality(Main.settings) || pending.FsrSharpness!=Main.settings.FsrSharpness); } }
         void Start() {
             controller=GetComponent<SettingsController>();
             try {
@@ -47,7 +48,7 @@ namespace DVLSFG {
                 var staging=new GameObject("DVLSFG inactive UI staging"); staging.SetActive(false);
                 try {
                     for(int i=0;i<10;i++) {
-                        if(i==4 || i==5 || i==8 || i==9) { rows.Add(null); continue; }
+                        if(i==4 || i==5 || i==9) { rows.Add(null); continue; }
                         if(i==7) {
                             var sliderRow=CreateSharpnessSlider(staging.transform);
                             AddTooltip(sliderRow,i);
@@ -74,10 +75,12 @@ namespace DVLSFG {
                         rows.Add(selector);
                         controls.Add(row);
                     }
+                    var gap=new GameObject("DVLSFG Graphics gap",typeof(RectTransform));
+                    gap.transform.SetParent(template.transform.parent,false); gap.transform.SetSiblingIndex(controls.Count);
                 } finally { Destroy(staging); }
                 graphicsScroll=MakeScrollable(template.transform.parent,FindDividerStyle(controller));
                 pending=Copy(Main.settings); Refresh();
-                Main.modEntry.Logger.Log("LSFG / FSR controls installed in native Graphics settings (6 controls with native descriptions)");
+                Main.modEntry.Logger.Log("Technology controls installed: 7 controls, reserved gap and native section divider");
             } catch(Exception e) { failure=e.Message; Main.modEntry.Logger.Error("Graphics settings integration: "+e); }
         }
         void AddTooltip(GameObject row,int field) {
@@ -97,9 +100,11 @@ namespace DVLSFG {
                 case 3:
                     return Text("调整光流计算的分辨率比例。较高值保留更多运动细节；较低值降低 GPU 开销，但可能增加伪影。","Adjust optical flow resolution. Higher values retain more motion detail; lower values reduce GPU cost but may increase artifacts.");
                 case 6:
-                    return Text("以较低分辨率渲染场景，再使用 FidelityFX Super Resolution 放大到输出分辨率。超高质量更清晰，性能模式降低更多渲染开销。\n当前渲染 / 输出：","Render the scene at a lower resolution and upscale to the output resolution with FidelityFX Super Resolution. Ultra Quality retains more detail; Performance reduces rendering cost further.\nCurrent rendering / output: ")+FsrRuntime.Status;
+                    return Text("选择超分辨率技术。FSR 1.0 使用 FidelityFX Super Resolution 将低分辨率场景放大到输出分辨率。\n当前渲染 / 输出：","Choose an upscaling technology. FSR 1.0 uses FidelityFX Super Resolution to upscale the scene to the output resolution.\nCurrent rendering / output: ")+FsrRuntime.Status;
                 case 7:
                     return Text("调整 FSR 放大后的锐化强度。0% 关闭锐化，100% 为最强锐化；过高可能使边缘出现光晕。\n当前渲染 / 输出：","Adjust sharpening after FSR upscaling. 0% disables sharpening; 100% is strongest. Excessive sharpening can cause edge halos.\nCurrent rendering / output: ")+FsrRuntime.Status;
+                case 8:
+                    return Text("调整超分辨率的画质与性能取舍。向右质量提高，向左渲染开销降低；关闭技术后仍保留所选档位。","Balance upscaling quality and performance. Move right for higher quality, left for lower rendering cost. The selected quality is retained when the technology is off.");
                 default: return "";
             }
         }
@@ -143,25 +148,57 @@ namespace DVLSFG {
             }
             return null;
         }
-        static ScrollRect MakeScrollable(Transform parent,Image dividerStyle) {
+        ScrollRect MakeScrollable(Transform parent,Image dividerStyle) {
             var grid=parent.GetComponent<GridLayoutGroup>();
             if(!grid) return null;
             var children=new List<Transform>(); foreach(Transform child in parent) children.Add(child);
-            var viewport=new GameObject("DVLSFG Graphics viewport",typeof(RectTransform),typeof(RectMask2D));
+            var viewport=new GameObject("DVLSFG Graphics viewport",typeof(RectTransform),typeof(RectMask2D),typeof(Image));
             viewport.transform.SetParent(parent,false);
+            // The empty space needs a raycast target too, so wheel events can
+            // bubble to ScrollRect even when no setting button is under it.
+            var viewportHitArea=viewport.GetComponent<Image>();
+            viewportHitArea.color=Color.clear; viewportHitArea.raycastTarget=true;
             var viewportRect=(RectTransform)viewport.transform;
             viewportRect.anchorMin=Vector2.zero; viewportRect.anchorMax=Vector2.one; viewportRect.offsetMin=new Vector2(0,75); viewportRect.offsetMax=Vector2.zero;
-            var content=new GameObject("DVLSFG Graphics content",typeof(RectTransform),typeof(GridLayoutGroup),typeof(ContentSizeFitter));
+            var content=new GameObject("DVLSFG Graphics content",typeof(RectTransform),typeof(VerticalLayoutGroup),typeof(ContentSizeFitter));
             content.transform.SetParent(viewport.transform,false);
             var contentRect=(RectTransform)content.transform;
             contentRect.anchorMin=new Vector2(0,1); contentRect.anchorMax=Vector2.one; contentRect.pivot=new Vector2(0,1); contentRect.sizeDelta=Vector2.zero;
-            var layout=content.GetComponent<GridLayoutGroup>();
+            var stack=content.GetComponent<VerticalLayoutGroup>();
+            stack.childControlWidth=true; stack.childControlHeight=true; stack.childForceExpandWidth=true; stack.childForceExpandHeight=false;
+            var custom=new GameObject("DVLSFG technology section",typeof(RectTransform),typeof(GridLayoutGroup),typeof(ContentSizeFitter)); custom.transform.SetParent(content.transform,false);
+            var native=new GameObject("DVLSFG native settings section",typeof(RectTransform),typeof(GridLayoutGroup),typeof(ContentSizeFitter));
+            // Keep native controls under their provider while reparenting; an inactive
+            // settings menu must not wake bindings in a detached active hierarchy.
+            native.transform.SetParent(content.transform,false);
+            foreach(var block in new[]{custom,native}) {
+            var layout=block.GetComponent<GridLayoutGroup>();
             layout.cellSize=grid.cellSize; layout.spacing=grid.spacing; layout.padding=grid.padding;
             layout.startCorner=grid.startCorner; layout.startAxis=grid.startAxis; layout.childAlignment=grid.childAlignment;
             layout.constraint=GridLayoutGroup.Constraint.FixedColumnCount; layout.constraintCount=2;
+            block.GetComponent<ContentSizeFitter>().verticalFit=ContentSizeFitter.FitMode.PreferredSize;
+            }
             content.GetComponent<ContentSizeFitter>().verticalFit=ContentSizeFitter.FitMode.PreferredSize;
             DestroyImmediate(grid);
-            foreach(var child in children) child.SetParent(content.transform,false);
+            foreach(var child in children) child.SetParent(child.name.StartsWith("DVLSFG Graphics",StringComparison.Ordinal) ? custom.transform : native.transform,false);
+            var sectionDivider=new GameObject("DVLSFG technology divider",typeof(RectTransform),typeof(LayoutElement)); sectionDivider.transform.SetParent(content.transform,false);
+            // Advanced gives the 20px graphic its own taller row plus layout
+            // spacing. Keep that clearance when placing it between two grids.
+            var dividerContainer=dividerStyle ? dividerStyle.transform.parent as RectTransform : null;
+            var dividerLayout=dividerContainer ? dividerContainer.parent.GetComponent<VerticalLayoutGroup>() : null;
+            float dividerHeight=dividerStyle ? dividerStyle.rectTransform.sizeDelta.y : 20;
+            float dividerRowHeight=dividerContainer ? dividerContainer.sizeDelta.y : 35;
+            sectionDivider.GetComponent<LayoutElement>().preferredHeight=Mathf.Max(dividerRowHeight,dividerHeight)+2*(dividerLayout ? dividerLayout.spacing : 0);
+            var sectionGraphic=dividerStyle ? Instantiate(dividerStyle.gameObject,sectionDivider.transform,false) : new GameObject("image",typeof(RectTransform),typeof(Image));
+            if(!dividerStyle) sectionGraphic.transform.SetParent(sectionDivider.transform,false);
+            var sectionRect=(RectTransform)sectionGraphic.transform;
+            sectionRect.anchorMin=new Vector2(0,.5f); sectionRect.anchorMax=new Vector2(1,.5f); sectionRect.pivot=new Vector2(.5f,.5f);
+            sectionRect.anchoredPosition=Vector2.zero; sectionRect.sizeDelta=new Vector2(dividerStyle ? dividerStyle.rectTransform.sizeDelta.x : -40,dividerHeight);
+            sectionGraphic.GetComponent<Image>().raycastTarget=false;
+            if(!dividerStyle) sectionGraphic.GetComponent<Image>().color=new Color(1,1,1,.25f);
+            native.transform.SetParent(content.transform,false);
+            native.transform.SetAsLastSibling();
+            controls.Add(custom); controls.Add(sectionDivider);
             var scroll=parent.gameObject.AddComponent<ScrollRect>();
             scroll.viewport=viewportRect; scroll.content=contentRect; scroll.horizontal=false; scroll.vertical=true;
             scroll.movementType=ScrollRect.MovementType.Clamped; scroll.scrollSensitivity=35;
@@ -212,7 +249,8 @@ namespace DVLSFG {
                 case 1: pending.Multiplier=index+2; break;
                 case 2: pending.Performance=index==1; break;
                 case 3: pending.FlowScale=new float[]{.25f,.5f,.75f,1f}[index]; break;
-                case 6: pending.FsrMode=index==0 ? 0 : 5-index; break;
+                case 6: pending.FsrMode=index==0 ? 0 : pending.FsrQuality; break;
+                case 8: pending.FsrQuality=5-index; if(pending.FsrMode>0) pending.FsrMode=pending.FsrQuality; break;
                 default: return;
             }
             Refresh();
@@ -225,13 +263,15 @@ namespace DVLSFG {
             syncing=true;
             try {
                 language=LocalizationManager.CurrentLanguageCode;
-                Set(0,Text("LSFG 帧生成","LSFG frame generation"),new List<string>{Text("关闭","Off"),Text("开启","On")},pending.Enabled?1:0,true);
-                Set(1,Text("帧生成倍率","Frame generation multiplier"),new List<string>{"2x","3x","4x"},pending.Multiplier-2,true);
-                Set(2,Text("帧生成模型","Frame generation model"),new List<string>{Text("标准","Standard"),Text("性能","Performance")},pending.Performance?1:0,true);
+                Set(0,Text("帧生成","Frame generation"),new List<string>{Text("关闭","Off"),"LSFG 3.1"},pending.Enabled?1:0,true);
+                Set(1,Text("帧生成倍率","Frame generation multiplier"),new List<string>{"2x","3x","4x"},pending.Multiplier-2,pending.Enabled);
+                Set(2,Text("帧生成模型","Frame generation model"),new List<string>{Text("标准","Standard"),Text("性能","Performance")},pending.Performance?1:0,pending.Enabled);
                 int scale=Mathf.Clamp(Mathf.RoundToInt(pending.FlowScale*4)-1,0,3);
-                Set(3,Text("光流质量","Optical flow quality"),new List<string>{"25%","50%","75%","100%"},scale,true);
-                Set(6,Text("FSR 超分辨率","FSR upscaling"),new List<string>{Text("关闭","Off"),Text("性能","Performance"),Text("平衡","Balanced"),Text("质量","Quality"),Text("超高质量","Ultra Quality")},pending.FsrMode==0 ? 0 : 5-pending.FsrMode,true);
-                sharpnessLabel.text=Text("FSR 锐化强度","FSR sharpening");
+                Set(3,Text("光流质量","Optical flow quality"),new List<string>{"25%","50%","75%","100%"},scale,pending.Enabled);
+                Set(6,Text("超分辨率技术","Upscaling technology"),new List<string>{Text("关闭","Off"),"FSR 1.0"},pending.FsrMode>0 ? 1 : 0,true);
+                Set(8,Text("超分辨率质量","Upscaling quality"),new List<string>{Text("超级性能","Ultra Performance"),Text("性能","Performance"),Text("平衡","Balanced"),Text("质量","Quality"),Text("超级质量","Ultra Quality")},5-Quality(pending),pending.FsrMode>0);
+                sharpnessSlider.ToggleInteractable(pending.FsrMode>0);
+                sharpnessLabel.text=Text("锐化强度","Sharpening");
                 int percent=Mathf.RoundToInt(pending.FsrSharpness*100);
                 sharpnessSlider.SetValueWithoutNotify(percent);
                 sharpnessValue.text=percent+"%";
@@ -311,6 +351,16 @@ namespace DVLSFG {
     [HarmonyPatch(typeof(SettingsController),"Awake")]
     static class InstallGraphicsSettings {
         static void Postfix(SettingsController __instance) { if(!__instance.GetComponent<GraphicsSettingsPanel>()) __instance.gameObject.AddComponent<GraphicsSettingsPanel>(); }
+    }
+    [HarmonyPatch(typeof(SettingChangeSourceSlider),"OnResetOrApplied")]
+    static class DeferUninitializedSettingsSlider {
+        static readonly FieldInfo Slider=AccessTools.Field(typeof(SettingChangeSourceSlider),"slider");
+        static bool Prefix(SettingChangeSourceSlider __instance) {
+            // The provider notifies hidden categories too. Their slider cache is
+            // populated by Awake only when they first become active; OnEnable
+            // will apply the latest provider value then.
+            return __instance.gameObject.activeInHierarchy || Slider.GetValue(__instance)!=null;
+        }
     }
     [HarmonyPatch(typeof(SettingsController),"get_HasChanges")]
     static class IncludeLSFGChanges {

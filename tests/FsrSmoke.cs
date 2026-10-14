@@ -31,7 +31,7 @@ namespace DVLSFGTests {
    settings=(Settings)AccessTools.Field(typeof(Main),"settings").GetValue(null);
    oldMode=settings.FsrMode; oldSharpness=settings.FsrSharpness; oldWidth=Screen.width; oldHeight=Screen.height; oldScreenMode=Screen.fullScreenMode;
    try {Setup();} catch(Exception e) {Fail(e); yield break;}
-   for(int mode=1;mode<=4;mode++) {
+   for(int mode=1;mode<=5;mode++) {
     settings.FsrMode=mode;
     yield return new WaitForSecondsRealtime(3);
     try {Check(mode);} catch(Exception e) {Fail(e); yield break;}
@@ -100,6 +100,7 @@ namespace DVLSFGTests {
     throw new Exception("GPU dispatch inactive state="+state+" frames="+args[1]+" status="+AccessTools.Property(typeof(FsrSceneCamera),"Status").GetValue(fsr,null));
    }
    if(output.width!=Screen.width || output.height!=Screen.height || input.width>=output.width || input.height>=output.height) throw new Exception("Render/output size separation failed");
+   if(mode==5 && (input.width!=Mathf.Max(8,Mathf.RoundToInt(Screen.width/3f)) || input.height!=Mathf.Max(8,Mathf.RoundToInt(Screen.height/3f)))) throw new Exception("Ultra Performance must render at one third of output dimensions");
    Color32 before=Pixel(input),after=Pixel(output);
    if(Math.Abs(before.r-after.r)>2 || Math.Abs(before.g-after.g)>2 || Math.Abs(before.b-after.b)>2 || after.a!=255) throw new Exception("Gamma/color mismatch: "+before+" -> "+after);
    if(before.r<30 || before.b<30) throw new Exception("Scene not rendered into low-resolution target");

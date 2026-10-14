@@ -23,7 +23,7 @@ and the game's Unity / UMM / I2 managed references. Download pinned dependencies
 ```
 
 `port.ps1` generates the Win32 port under `build/port`; edit the transformation or
-native sources, not generated files. The archive is `dist/DVLSFG-0.4.6.zip`.
+native sources, not generated files. The archive is `dist/DVLSFG-0.4.12.zip`.
 The bootstrap generator reads the local system loader's export names/ordinals and
 builds x64 argument-preserving forwarding stubs; no system loader binary is bundled.
 No Lossless.dll, extracted LSFG shaders or user model paths are distributed.

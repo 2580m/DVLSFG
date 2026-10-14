@@ -1,5 +1,100 @@
 # DVLSFG validation record
 
+## 0.4.12 Ultra Performance upscaling
+
+Adds mode 5 at one third of output width and height; modes 1..4 keep their original
+ratios and persisted meanings. Chinese Ultra Quality is renamed to 超级质量.
+Quality increases left-to-right from Ultra Performance to Ultra Quality.
+Settings checks cover mode 5 persistence, quality retention while Off, legacy
+configuration and invalid values. The in-game UI fixture covers all five mappings,
+Apply/Discard, technology availability and existing scrolling/layout regressions.
+The synthetic GPU fixture covers all five modes, explicitly checking mode 5's
+one-third render dimensions, output dimensions, native dispatch and color values.
+Evidence: build/ultra-performance-ui.log, build/ultra-performance-ui-fixture,
+and build/ultra-performance-gpu-fixture/fsr-smoke.log.
+
+## 0.4.11 dependent control availability
+
+The pending technology selection immediately updates native interactability:
+Off disables generation multiplier/model/flow, or upscaling quality/sharpening.
+Selectors and SliderDV use their native ToggleInteractable behavior. Technology
+switches stay enabled and dependent values are retained. In-game checks passed
+Off/On updates before Apply, value retention and Discard restoration, followed by
+the existing blank-space scrolling, layout, Apply/Discard and live settings checks.
+Evidence: build/dependent-controls-ui.log and build/dependent-controls-ui-fixture/passed.txt.
+
+## 0.4.10 scrolling over blank space
+
+The scrolling viewport has a transparent raycastable Image so empty cells,
+button gaps and section dividers can forward wheel events to the ScrollRect.
+Its bounds exclude the fixed preset area. In-game EventSystem raycasts at the
+reserved empty cell and technology divider hit this viewport, and dispatching
+wheel events through those hits moved the content. Existing layout, descriptions,
+Apply/Discard, sharpening and live model/flow checks passed.
+Evidence: build/blank-scroll-ui.log and build/blank-scroll-ui-fixture/passed.txt.
+No Computer Use was required; launch used the desktop Steam shortcut.
+
+## 0.4.9 section divider clearance
+
+The technology/native section divider now uses the Advanced divider's row height
+and surrounding layout spacing instead of stretching the graphic to fill its row.
+In-game geometry checks measured a 35-unit row and 20-unit centered graphic,
+leaving 7.5 units above and below, matching the native row's clearance.
+The existing UI fixture also passed section ordering, the reserved quality gap,
+descriptions, Apply/Discard, sharpening and live model/flow checks.
+Evidence: build/divider-ui.log and build/divider-ui-fixture/passed.txt.
+The game was launched using the desktop Steam shortcut; no Computer Use was used.
+
+## 0.4.8 technology selectors and section layout
+
+Frame Generation selects Off/LSFG. Upscaling Technology selects Off/FSR 1.0,
+while Upscaling Quality independently selects Performance→Balanced→Quality→Ultra
+Quality and Sharpening uses a generic label. Persisted FsrMode remains compatible;
+FsrQuality retains the quality selection while mode is Off. Existing enabled modes
+initialize the quality field without changing their rendering scale.
+
+The scroll content uses a vertical stack of two native-style two-column grids,
+separated by the Advanced settings divider graphic. The technology grid contains
+seven controls plus an empty right-hand cell below sharpening. Native controls
+start in the separate grid, so they cannot occupy the reserved gap. Disabling the
+mod hides the whole custom section and its divider. The existing fixed-preset
+divider is retained. Configuration roundtrip/migration/invalid-value checks passed.
+The game was launched through the user's desktop Steam shortcut. Automated UI
+checks passed the technology choices, quality's position below the technology row,
+reserved cell, full-width section divider, all four quality mappings, quality retention
+while Off and reuse on enable. Apply/Discard, 0/37/100% sharpening and live model/flow
+regressions passed. Native controls stay under their settings provider during reparenting.
+Reset notifications for still-inactive sliders whose Awake cache is uninitialized
+are deferred until their normal OnEnable synchronization, fixing an Apply/Discard
+exception exposed by the reorganized hierarchy. No Computer Use was required.
+Evidence: build/technology-ui.log and build/technology-ui-fixture/passed.txt.
+
+## 0.4.7 FSR world picking
+
+FSR sets the scene camera's targetTexture to a smaller render target. Unity's
+ScreenPointToRay interprets pixel coordinates against that target, whereas mouse
+input remains in display pixels. Cab grabbing, junction selection, hover detection
+and external camera interactions use that API, explaining their visible offset.
+
+A Harmony prefix on the managed Camera.ScreenPointToRay(Vector2, eye) wrapper
+shared by the public overloads converts display pixels to viewport coordinates and
+uses ViewportPointToRay, only for Mono rays from a camera still owning its FSR target.
+The cached camera registry avoids global scans. Input.mousePosition, overlay UI,
+unowned render targets and stereo rays are untouched. Ownership rather than the
+requested setting also covers the frame between disabling FSR and releasing its target.
+
+Actual scene tests compare both public ray overloads at six screen locations with
+viewport rays and hit a small physical collider independently positioned with
+ViewportToWorldPoint. A separate render-target camera verifies native pixel semantics.
+The picking-only fixture needs no mouse input or foreground automation. It skips the
+unrelated live-generation stress sequence while retaining view/mode/resize coverage.
+The real-save run passed at 2560x1440 in first-person and ExternalCam views, all
+four FSR modes, a 1280x720 resize, FSR Off, and restoration of the original Balanced
+mode and resolution. Each of the nine stages passed six physical-target probes,
+both public Mono ray overloads and the unaffected-camera control. All user mods
+remained installed/enabled; no physical clicks on locomotive controls were performed.
+Evidence: build/fsr-picking-world-fixture/world.log and build/fsr-picking-player.log.
+
 ## 0.4.6 FSR selector order
 
 The selector now displays Off→Performance→Balanced→Quality→Ultra Quality.

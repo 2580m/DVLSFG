@@ -21,7 +21,7 @@ namespace DVLSFG {
         static Type graphicsType;
         static FieldInfo gameCameraField;
         internal static string failure;
-        internal static readonly float[] Ratios={1f,1f/1.3f,1f/1.5f,1f/1.7f,.5f};
+        internal static readonly float[] Ratios={1f,1f/1.3f,1f/1.5f,1f/1.7f,.5f,1f/3f};
         internal static bool Requested {get {return Main.modEntry!=null && Main.modEntry.Active && Main.settings.FsrMode>0;}}
         static void Metadata() {
             if(graphicsType!=null) return;
@@ -82,6 +82,7 @@ namespace DVLSFG {
         int failedMode=-1,failedWidth,failedHeight;
         string error;
         bool owned;
+        internal bool OwnsSceneTarget { get { return owned && Scene && sceneTarget && Scene.targetTexture==sceneTarget; } }
         void Awake() {Scene=GetComponent<Camera>(); FsrRuntime.Cameras.Add(this);}
         internal string Status {
             get {
@@ -188,6 +189,24 @@ namespace DVLSFG {
             if(destination==null && mainTarget) main.targetTexture=null;
             try {Graphics.Blit(output,destination);}
             finally {if(destination==null && mainTarget && main) main.targetTexture=mainTarget;}
+        }
+    }
+    [HarmonyPatch]
+    static class FsrScreenPointRay {
+        // Patch the managed Vector2 wrapper shared by the public Vector3 overloads.
+        // Input.mousePosition remains in display pixels; only our offscreen scene
+        // cameras need conversion to the viewport shown by the FSR compositor.
+        static MethodBase TargetMethod() {
+            return AccessTools.Method(typeof(Camera),"ScreenPointToRay",new[]{typeof(Vector2),typeof(Camera.MonoOrStereoscopicEye)});
+        }
+        static bool Prefix(Camera __instance,Vector2 pos,Camera.MonoOrStereoscopicEye eye,ref Ray __result) {
+            if(eye!=Camera.MonoOrStereoscopicEye.Mono || !__instance || Screen.width<=0 || Screen.height<=0) return true;
+            foreach(var fsr in FsrRuntime.Cameras) {
+                if(!fsr || fsr.Scene!=__instance || !fsr.OwnsSceneTarget) continue;
+                __result=__instance.ViewportPointToRay(new Vector3(pos.x/Screen.width,pos.y/Screen.height,0),eye);
+                return false;
+            }
+            return true;
         }
     }
     [HarmonyPatch]

@@ -3,6 +3,7 @@ using System.IO;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using UnityModManagerNet;
 using DV.UI;
 using DV.UIFramework;
@@ -17,6 +18,21 @@ namespace DVLSFGTests {
         static SettingsController controller;
         static int liveStep,oldModel,oldFlow;
         public static bool Load(UnityModManager.ModEntry mod) { entry=mod; mod.OnUpdate=Update; return true; }
+        static void CheckBlankScroll(ScrollRect scroll,RectTransform blank) {
+            Canvas.ForceUpdateCanvases();
+            var canvas=scroll.GetComponentInParent<Canvas>();
+            var camera=canvas.renderMode==RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            var point=RectTransformUtility.WorldToScreenPoint(camera,blank.TransformPoint(blank.rect.center));
+            var pointer=new PointerEventData(EventSystem.current) {position=point,scrollDelta=new Vector2(0,-1)};
+            var hits=new System.Collections.Generic.List<RaycastResult>();
+            EventSystem.current.RaycastAll(pointer,hits);
+            if(hits.Count==0 || hits[0].gameObject!=scroll.viewport.gameObject) throw new Exception("Blank area does not hit viewport: "+blank.name+(hits.Count>0 ? " hit="+hits[0].gameObject.name : " no hit"));
+            var before=scroll.content.anchoredPosition;
+            ExecuteEvents.ExecuteHierarchy(hits[0].gameObject,pointer,ExecuteEvents.scrollHandler);
+            if(scroll.content.anchoredPosition==before) throw new Exception("Blank area wheel did not move content: "+blank.name);
+            scroll.verticalNormalizedPosition=1;
+            entry.Logger.Log("BLANK SCROLL PASS: "+blank.name+" raycast and wheel propagation");
+        }
         static void Update(UnityModManager.ModEntry mod,float delta) {
             if(stage<0) return;
             if(DateTime.UtcNow<deadline) return;
@@ -41,18 +57,54 @@ namespace DVLSFGTests {
                             rows=marker.GetComponentsInChildren<Selector>(true);
                             var list=new System.Collections.Generic.List<Selector>();
                             foreach(var row in rows) if(row.name.StartsWith("DVLSFG Graphics")) list.Add(row);
-                            if(list.Count!=5) throw new Exception("Expected 5 editable selectors plus FSR slider, found "+list.Count);
+                            if(list.Count!=6) throw new Exception("Expected 6 editable selectors plus sharpening slider, found "+list.Count);
                             rows=new Selector[10]; foreach(var row in list) rows[int.Parse(row.name.Substring("DVLSFG Graphics ".Length))]=row;
                             foreach(var slider in marker.GetComponentsInChildren<SliderDV>(true)) if(slider.name=="DVLSFG Graphics 7") sharpness=slider;
                             if(!sharpness || sharpness.minValue!=0 || sharpness.maxValue!=100 || !sharpness.wholeNumbers) throw new Exception("FSR 0-100 percent slider absent");
                             var scroll=marker.GetComponent<ScrollRect>();
                             if(!scroll || !scroll.vertical || !scroll.verticalScrollbar) throw new Exception("Graphics scroll controls absent");
-                            foreach(int removed in new[]{4,5,8,9}) if(rows[removed]) throw new Exception("Read-only status/prompt row remains: "+removed);
-                            entry.Logger.Log("PREVIEW PASS: five editable selectors plus native FSR sharpening slider; no status/prompt controls");
+                            foreach(int removed in new[]{4,5,9}) if(rows[removed]) throw new Exception("Read-only status/prompt row remains: "+removed);
+                            if(rows[0].GetValues()[1]!="LSFG 3.1" || rows[6].GetValues()[1]!="FSR 1.0" || rows[8].GetValues().Count!=5) throw new Exception("Technology/quality selectors incorrect");
+                            var section=rows[6].transform.parent;
+                            if(section!=rows[8].transform.parent || rows[8].transform.GetSiblingIndex()!=6 || section.childCount!=8 || section.GetChild(7).name!="DVLSFG Graphics gap") throw new Exception("Quality row or reserved gap misplaced");
+                            if(section.parent.GetChild(1).name!="DVLSFG technology divider" || section.parent.GetChild(2).name!="DVLSFG native settings section") throw new Exception("Native section divider missing");
+                            Canvas.ForceUpdateCanvases();
+                            foreach(var advanced in screen.GetComponentsInChildren<SettingsCategoryMarker>(true)) if(advanced.categoryName=="Advanced") {
+                                foreach(var image in advanced.GetComponentsInChildren<Image>(true)) if(image.name=="image" && image.transform.parent.name.StartsWith("Divider")) {
+                                    var box=(RectTransform)image.transform.parent;
+                                    var layout=box.parent.GetComponent<LayoutGroup>();
+                                    entry.Logger.Log("NATIVE DIVIDER BOX: rect="+box.rect+" size="+box.sizeDelta+" preferred="+LayoutUtility.GetPreferredHeight(box)+" layout="+layout+" image="+image.rectTransform.rect);
+                                    var divider=(RectTransform)section.parent.GetChild(1);
+                                    var graphic=divider.GetComponentInChildren<Image>().rectTransform;
+                                    float spacing=((VerticalLayoutGroup)layout).spacing;
+                                    float expected=box.sizeDelta.y+2*spacing;
+                                    if(Math.Abs(divider.rect.height-expected)>.1f || Math.Abs(graphic.rect.height-image.rectTransform.rect.height)>.1f || graphic.anchoredPosition.y!=0 || divider.rect.height<=graphic.rect.height) throw new Exception("Divider does not preserve native vertical clearance");
+                                    entry.Logger.Log("DIVIDER CLEARANCE PASS: container="+divider.rect.height+" graphic="+graphic.rect.height+" clearance per side="+((divider.rect.height-graphic.rect.height)/2)+" native spacing="+spacing);
+                                }
+                            }
+                            if(Math.Abs(rows[8].transform.localPosition.x-rows[6].transform.localPosition.x)>.1f || rows[8].transform.localPosition.y>=rows[6].transform.localPosition.y) throw new Exception("Quality is not below the technology selector");
+                            entry.Logger.Log("PREVIEW PASS: six selectors plus sharpening slider, quality below technology, reserved empty cell and native divider");
                             stage=2; deadline=DateTime.UtcNow.AddSeconds(2); return;
                         }
                     }
                 } else if(stage==2) {
+                    var scroll=rows[0].GetComponentInParent<ScrollRect>();
+                    scroll.verticalNormalizedPosition=1;
+                    CheckBlankScroll(scroll,(RectTransform)rows[0].transform.parent.GetChild(7));
+                    CheckBlankScroll(scroll,(RectTransform)scroll.content.GetChild(1));
+                    int originalGeneration=rows[0].SelectedIndex,originalUpscaling=rows[6].SelectedIndex;
+                    int originalMultiplier=rows[1].SelectedIndex,originalModel=rows[2].SelectedIndex,originalFlow=rows[3].SelectedIndex,originalQuality=rows[8].SelectedIndex;
+                    float originalSharpness=sharpness.value;
+                    foreach(int index in new[]{0,1}) {
+                        rows[0].SetSelectedIndex(index,true); rows[6].SetSelectedIndex(index,true);
+                        foreach(int dependent in new[]{1,2,3,8}) if(rows[dependent].IsInteractable!=(index==1)) throw new Exception("Dependent selector did not update immediately: "+dependent);
+                        if(sharpness.IsInteractable!=(index==1) || sharpness.interactable!=(index==1)) throw new Exception("Sharpening did not update immediately");
+                        if(!rows[0].IsInteractable || !rows[6].IsInteractable) throw new Exception("Technology switches disabled");
+                    }
+                    ((Button)AccessTools.Field(typeof(SettingsController),"revertChanges").GetValue(controller)).onClick.Invoke();
+                    if(rows[0].SelectedIndex!=originalGeneration || rows[6].SelectedIndex!=originalUpscaling || rows[1].SelectedIndex!=originalMultiplier || rows[2].SelectedIndex!=originalModel || rows[3].SelectedIndex!=originalFlow || rows[8].SelectedIndex!=originalQuality || sharpness.value!=originalSharpness) throw new Exception("Technology toggle/discard lost selected values");
+                    if(rows[1].IsInteractable!=(originalGeneration==1) || rows[8].IsInteractable!=(originalUpscaling==1) || sharpness.IsInteractable!=(originalUpscaling==1)) throw new Exception("Discard did not restore dependent interactability");
+                    entry.Logger.Log("DEPENDENT CONTROLS PASS: immediate disable/enable before Apply, native interactability, retained values and Discard restore");
                     var nativeTooltip=rows[2].GetComponent<UIElementTooltip>();
                     var handler=(TooltipHandler)AccessTools.Field(typeof(UIElementTooltip),"tooltipHandler").GetValue(nativeTooltip);
                     var footer=(TMPro.TMP_Text)AccessTools.Field(typeof(TooltipHandler),"tooltipText").GetValue(handler);
@@ -63,7 +115,7 @@ namespace DVLSFGTests {
                     footer.ForceMeshUpdate(); if(footer.isTextTruncated) throw new Exception("Model description clipped in native footer");
                     if(modelHelp.Split('\n').Length!=2 || (!modelHelp.Contains("标准：") && !modelHelp.Contains("Standard:")) || (!modelHelp.Contains("性能：") && !modelHelp.Contains("Performance:")) || modelHelp.Contains("重启") || modelHelp.Contains("Restart")) throw new Exception("Live model description incorrect: "+modelHelp);
                     handler.RemoveTooltipAndUpdate(nativeTooltip);
-                    foreach(var control in new GameObject[]{rows[0].gameObject,rows[1].gameObject,rows[2].gameObject,rows[3].gameObject,rows[6].gameObject,sharpness.gameObject}) {
+                    foreach(var control in new GameObject[]{rows[0].gameObject,rows[1].gameObject,rows[2].gameObject,rows[3].gameObject,rows[6].gameObject,rows[8].gameObject,sharpness.gameObject}) {
                         var tooltip=control.GetComponent<UIElementTooltip>();
                         if(!tooltip || !tooltip.enabled) throw new Exception("Native tooltip missing: "+control.name);
                         handler.AddTooltipAndUpdate(tooltip);
@@ -99,13 +151,19 @@ namespace DVLSFGTests {
                         if(Settings.Read(settingsFile).Enabled!=(oldEnabled==0)) throw new Exception("Native LSFG toggle did not persist");
                         rows[0].SetSelectedIndex(oldEnabled,true); apply.onClick.Invoke();
                         entry.Logger.Log("TOGGLE/STATUS PASS: independent LSFG enablement and live multiplier request");
-                        int oldFsr=rows[6].SelectedIndex; rows[6].SetSelectedIndex((oldFsr+1)%5,true);
+                        int oldFsr=rows[6].SelectedIndex; int oldQuality=rows[8].SelectedIndex;
+                        rows[6].SetSelectedIndex(1-oldFsr,true);
                         if(!controller.HasChanges) throw new Exception("FSR change not detected");
                         discard.onClick.Invoke();
                         if(rows[6].SelectedIndex!=oldFsr) throw new Exception("FSR discard failed");
-                        rows[6].SetSelectedIndex((oldFsr+1)%5,true); apply.onClick.Invoke();
-                        int nextFsr=(oldFsr+1)%5;
-                        if(Settings.Read(settingsFile).FsrMode!=(nextFsr==0 ? 0 : 5-nextFsr)) throw new Exception("FSR apply failed");
+                        rows[6].SetSelectedIndex(0,true); apply.onClick.Invoke();
+                        rows[8].SetSelectedIndex((oldQuality+1)%5,true); apply.onClick.Invoke();
+                        var offSettings=Settings.Read(settingsFile);
+                        if(offSettings.FsrMode!=0 || offSettings.FsrQuality!=5-(oldQuality+1)%5) throw new Exception("Quality not retained while technology is off");
+                        rows[6].SetSelectedIndex(1,true); apply.onClick.Invoke();
+                        if(Settings.Read(settingsFile).FsrMode!=offSettings.FsrQuality) throw new Exception("Technology enable did not restore selected quality");
+                        foreach(int quality in new[]{0,1,2,3,4}) {rows[8].SetSelectedIndex(quality,true); apply.onClick.Invoke(); if(Settings.Read(settingsFile).FsrMode!=5-quality) throw new Exception("Quality mode mapping incorrect");}
+                        rows[8].SetSelectedIndex(oldQuality,true); apply.onClick.Invoke();
                         rows[6].SetSelectedIndex(oldFsr,true); apply.onClick.Invoke();
                         entry.Logger.Log("FSR APPLY/DISCARD PASS");
                         float oldSharp=sharpness.value;

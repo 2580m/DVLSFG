@@ -1,4 +1,21 @@
-# DV LSFG 0.4.6 (experimental)
+# DV LSFG 0.4.12 (experimental)
+
+0.4.12 adds Ultra Performance (one third of output width and height). Quality
+increases left-to-right: Ultra Performance, Performance, Balanced, Quality, Ultra Quality.
+Existing scaling ratios and configuration values remain unchanged.
+
+0.4.11 immediately grays out and disables dependent controls when their technology
+is Off, retaining values on re-enable. The generation option reads LSFG 3.1.
+Blank viewport space accepts wheel scrolling; section dividers retain native clearance.
+
+0.4.8 separates technology and quality: Frame Generation selects Off/LSFG,
+Upscaling Technology selects Off/FSR 1.0, with Upscaling Quality beneath and a
+reserved empty slot to its right. Sharpening has a generic label. A native-style
+divider separates these controls from the game's settings. Quality is retained when off.
+
+0.4.7 fixes world picking offsets with FSR enabled. Scene-camera mouse rays use
+display coordinates instead of the smaller render-target dimensions. UI input
+coordinates remain unchanged.
 
 0.4.6 orders the FSR selector left-to-right as Off, Performance, Balanced, Quality,
 Ultra Quality. Persisted mode values and rendering scales remain compatible.
