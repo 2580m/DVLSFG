@@ -118,7 +118,7 @@ namespace DVLSFG {
                 case 6:
                     if(pending.FsrMode==0) return L10n.Get("dv_scaling/choose_upscaling_technology");
                     if(pending.FsrTechnology==2 && pending.FsrMode>0) return L10n.Get("dv_scaling/fsr3_description")+FsrRuntime.Status;
-                    return L10n.Get("dv_scaling/fsr1_description");
+                    return L10n.Get("dv_scaling/fsr1_description")+FsrRuntime.Status;
                 case 7:
                     return L10n.Get("dv_scaling/adjust_sharpening_after_fsr_upscaling_0_disables_sharpening")+FsrRuntime.Status;
                 case 8:
