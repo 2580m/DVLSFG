@@ -66,7 +66,7 @@ namespace DVLSFGTests {
                             var scroll=marker.GetComponent<ScrollRect>();
                             if(!scroll || !scroll.vertical || !scroll.verticalScrollbar) throw new Exception("Graphics scroll controls absent");
                             foreach(int removed in new[]{4,5,9}) if(rows[removed]) throw new Exception("Read-only status/prompt row remains: "+removed);
-                            if(rows[0].GetValues().Count!=3 || rows[0].GetValues()[1]!="LSFG 3.1" || rows[0].GetValues()[2]!="FSR 3.1" || rows[6].GetValues()[1]!="FSR 1.0" || rows[8].GetValues().Count!=5) throw new Exception("Technology/quality selectors incorrect");
+                            if(rows[0].GetValues().Count!=3 || rows[0].GetValues()[1]!="LSFG 3.1" || rows[0].GetValues()[2]!="AMD FSR FG 3.1" || rows[6].GetValues()[1]!="FSR 1.0" || rows[8].GetValues().Count!=5) throw new Exception("Technology/quality selectors incorrect");
                             var section=rows[6].transform.parent;
                             if(section!=rows[8].transform.parent || rows[8].transform.GetSiblingIndex()!=6 || section.childCount!=8 || section.GetChild(7).name!="DVLSFG Graphics gap") throw new Exception("Quality row or reserved gap misplaced");
                             if(section.parent.GetChild(1).name!="DVLSFG technology divider" || section.parent.GetChild(2).name!="DVLSFG native settings section") throw new Exception("Native section divider missing");

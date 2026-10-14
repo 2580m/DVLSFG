@@ -1,9 +1,9 @@
 # DV Scaling 0.6.0 (experimental)
 
 
-## 0.6.0: FSR 3.1 frame generation
+## 0.6.0: AMD FSR FG 3.1
 
-Frame Generation now selects Off, LSFG 3.1 or FSR 3.1. AMD's official optical-flow
+Frame Generation now selects Off, LSFG 3.1 or AMD FSR FG 3.1. AMD's official optical-flow
 and frame-interpolation algorithms use the engine's actual depth and motion
 vectors and produce a fixed 2x output. Model and optical-flow quality belong to
 LSFG and are disabled for FSR. FSR FG works independently of upscaling (Off,

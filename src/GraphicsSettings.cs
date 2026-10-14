@@ -281,7 +281,7 @@ namespace DVLSFG {
             try {
                 language=LocalizationManager.CurrentLanguageCode;
                 bool lsfg=pending.Enabled && pending.FrameGenerationTechnology==1;
-                Set(0,L10n.Get("dv_scaling/frame_generation"),new List<string>{L10n.Get("dv_scaling/off"),"LSFG 3.1","FSR 3.1"},pending.Enabled?pending.FrameGenerationTechnology:0,true);
+                Set(0,L10n.Get("dv_scaling/frame_generation"),new List<string>{L10n.Get("dv_scaling/off"),"LSFG 3.1","AMD FSR FG 3.1"},pending.Enabled?pending.FrameGenerationTechnology:0,true);
                 Set(1,L10n.Get("dv_scaling/frame_generation_multiplier"),new List<string>{"2x","3x","4x"},pending.FrameGenerationTechnology==2 ? 0 : pending.Multiplier-2,lsfg);
                 Set(2,L10n.Get("dv_scaling/frame_generation_model"),new List<string>{L10n.Get("dv_scaling/standard"),L10n.Get("dv_scaling/performance")},pending.Performance?1:0,lsfg);
                 int scale=Mathf.Clamp(Mathf.RoundToInt(pending.FlowScale*4)-1,0,3);
