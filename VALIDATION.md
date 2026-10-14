@@ -1,5 +1,23 @@
 # DVLSFG validation record
 
+## 0.4.14 local CSV localization
+
+Moves 62 bilingual UI/status/description terms into the bundled translations.csv.
+DVLangHelper is a declared UMM dependency. The source ID is dv_scaling, keys use
+the dv_scaling/ prefix, and runtime lookup uses DV.Localization.LocalizationAPI.L.
+An early-startup English fallback is loaded from the same CSV. English/Simplified
+Chinese text is retained, other languages use English, and Traditional Chinese
+retains the previous Simplified Chinese text until a separate translation is added.
+No helper binaries or online translation requests are bundled.
+
+CSV checks passed unique keys, English/Chinese contents and every source reference.
+The installed game registered the source through Language Helper. In-game checks
+passed English/Chinese switching, German English text, translated quality values
+and quoted multiline descriptions. The original language was restored. Existing
+layout, blank scrolling, dependent controls, Apply/Discard, sharpening and live
+model/flow regression checks passed. Configuration was restored byte-for-byte.
+Evidence: build/localization-ui.log and build/localization-ui-fixture/passed.txt.
+
 ## 0.4.13 installation directory
 
 The package root and installed directory are dv-scaling. The bootstrap selects

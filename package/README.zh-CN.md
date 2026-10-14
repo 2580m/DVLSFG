@@ -1,4 +1,7 @@
-# DV LSFG 0.4.13（实验版）
+# DV LSFG 0.4.14（实验版）
+
+0.4.14 界面文本改由本地 `translations.csv` 和 DV Language Helper 提供，需要安装
+并启用 DVLangHelper。语言随游戏切换，支持 Language Helper 的翻译覆盖；不联网获取翻译。
 
 0.4.13 安装目录改为 `Mods/dv-scaling`，安装包内目录同步调整。已有用户迁移整个
 `Mods/DVLSFG` 目录即可保留配置；升级时不要同时保留两份安装。
@@ -58,7 +61,7 @@ DVLSFG 不修改或包含 DVVulkan，也不修改系统 Vulkan 注册表。
 
 ## 安装和启动
 
-1. 退出游戏，把 dv-scaling-0.4.13.zip 拖入 UMM 安装。
+1. 退出游戏，把 dv-scaling-0.4.14.zip 拖入 UMM 安装。
 2. 确保 DVVulkan 已启用且完成退出后的 DXVK 部署。
 3. 普通启动游戏，在 UMM 启用 DVLSFG，填写自己安装的 `Lossless.dll` 完整路径并保存。
    打开游戏“设置 → 图形质量”，将“LSFG 帧生成”设为开启，点击原生“应用”。

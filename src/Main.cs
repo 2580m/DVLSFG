@@ -34,10 +34,11 @@ namespace DVLSFG {
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void Capture();
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void InputFrameLimit(int value);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void Metrics(out float input,out float submitted,out float mean,out float peak);
-        static string T(string zh,string en) { try { return (LocalizationManager.CurrentLanguageCode ?? "").StartsWith("zh",StringComparison.OrdinalIgnoreCase) ? zh : en; } catch { return en; } }
         public static bool Load(UnityModManager.ModEntry entry) {
             modEntry=entry;
             directory = Path.GetFullPath(entry.Path); config=Path.Combine(directory,"config.ini");
+            try { L10n.Initialize(directory); }
+            catch(Exception e) { entry.Logger.Error("Localization: "+e); return false; }
             try { settings=Settings.Read(config); }
             catch(Exception e) { settings=new Settings(); error=e.Message; entry.Logger.Error(e.Message); }
             runtimeSettings=new Settings {Enabled=settings.Enabled,DllPath=settings.DllPath,Multiplier=settings.Multiplier,Performance=settings.Performance,FlowScale=settings.FlowScale};
@@ -46,7 +47,7 @@ namespace DVLSFG {
             entry.OnUpdate=UpdateFrameLimit;
             Bind();
             new Harmony("DVLSFG.GraphicsSettings").PatchAll(typeof(Main).Assembly);
-            entry.Logger.Log(T("DVLSFG 已加载；插帧状态请查看设置页。","DVLSFG loaded; see settings for actual frame generation status."));
+            entry.Logger.Log(L10n.Get("dv_scaling/dvlsfg_loaded_see_settings_for_actual_frame_generation_statu"));
             return true;
         }
         static void Bind() {
@@ -99,24 +100,24 @@ namespace DVLSFG {
         internal static bool NativeLoaded { get { Bind(); return loaded; } }
         internal static string GraphicsStatus {
             get {
-                if(!NativeLoaded) return AutoStartup.Error!=null ? T("启动接入失败，请查看 UMM","Startup setup failed; see UMM") : !settings.Enabled ? T("已关闭","Off") : T("需重启以启用","Restart to enable");
+                if(!NativeLoaded) return AutoStartup.Error!=null ? L10n.Get("dv_scaling/startup_setup_failed_see_umm") : !settings.Enabled ? L10n.Get("dv_scaling/off") : L10n.Get("dv_scaling/restart_to_enable");
                 if(settings.DllPath!=runtimeSettings.DllPath)
-                    return T("需重启以应用","Restart to apply");
+                    return L10n.Get("dv_scaling/restart_to_apply");
                 if(getGenerationSettings!=null) {
                     int change=RefreshGenerationSettings();
-                    if(change==1) return T("正在切换帧生成设置","Switching generation settings");
-                    if(change<0) return T("切换失败，当前 ","Change failed; active ")+runtimeSettings.Multiplier+"x / "+
-                        (runtimeSettings.Performance ? T("性能","Performance") : T("标准","Standard"))+" / "+Mathf.RoundToInt(runtimeSettings.FlowScale*100)+"%";
+                    if(change==1) return L10n.Get("dv_scaling/switching_generation_settings");
+                    if(change<0) return L10n.Get("dv_scaling/change_failed_active")+runtimeSettings.Multiplier+"x / "+
+                        (runtimeSettings.Performance ? L10n.Get("dv_scaling/performance") : L10n.Get("dv_scaling/standard"))+" / "+Mathf.RoundToInt(runtimeSettings.FlowScale*100)+"%";
                 } else if(getMultiplier!=null) {
                     int actual; int change=getMultiplier(out actual); runtimeSettings.Multiplier=actual;
-                    if(change==1) return T("正在切换倍率","Switching multiplier");
-                    if(change<0) return T("倍率切换失败，当前 ","Multiplier change failed; active ")+actual+"x";
+                    if(change==1) return L10n.Get("dv_scaling/switching_multiplier");
+                    if(change<0) return L10n.Get("dv_scaling/multiplier_change_failed_active")+actual+"x";
                 }
                 if(settings.Performance!=runtimeSettings.Performance || settings.FlowScale!=runtimeSettings.FlowScale)
-                    return getGenerationSettings==null ? T("需重启以应用","Restart to apply") : T("帧生成设置尚未应用","Generation settings not applied");
-                if(settings.Multiplier!=runtimeSettings.Multiplier) return T("倍率尚未应用","Multiplier not applied");
+                    return getGenerationSettings==null ? L10n.Get("dv_scaling/restart_to_apply") : L10n.Get("dv_scaling/generation_settings_not_applied");
+                if(settings.Multiplier!=runtimeSettings.Multiplier) return L10n.Get("dv_scaling/multiplier_not_applied");
                 var message=new StringBuilder(4096); ulong real,generated; int active=status(message,4096,out real,out generated);
-                return active==0 ? T("已关闭 / 不可用","Off / unavailable") : generated>0 ? T("正在插帧","Generating frames") : T("尚未生成帧","No frames generated yet");
+                return active==0 ? L10n.Get("dv_scaling/off_unavailable") : generated>0 ? L10n.Get("dv_scaling/generating_frames") : L10n.Get("dv_scaling/no_frames_generated_yet");
             }
         }
         internal static void ApplyEnabled() {
@@ -132,23 +133,23 @@ namespace DVLSFG {
             }
         }
         static void Draw(UnityModManager.ModEntry entry) {
-            Bind(); GUILayout.Label("DV LSFG 0.4.13 — " + T("实验版本","Experimental"));
+            Bind(); GUILayout.Label("DV LSFG 0.4.14 — " + L10n.Get("dv_scaling/experimental"));
             GUILayout.Label("FSR 1.0: "+FsrRuntime.Status);
-            GUILayout.Label(T("前置：已启用的 DVVulkan；仅支持非 VR、SDR。","Requires active DVVulkan; non-VR SDR only."));
+            GUILayout.Label(L10n.Get("dv_scaling/requires_active_dvvulkan_non_vr_sdr_only"));
             if(loaded) {
                 var message=new StringBuilder(4096); ulong real,generated; int active=status(message,4096,out real,out generated);
-                GUILayout.Label(T("原生层已加载：","Native layer loaded: ") + message);
-                GUILayout.Label(T("已处理真实帧 / 生成帧：","Processed real / generated frames: ") + real + " / " + generated);
+                GUILayout.Label(L10n.Get("dv_scaling/native_layer_loaded") + message);
+                GUILayout.Label(L10n.Get("dv_scaling/processed_real_generated_frames") + real + " / " + generated);
                 if(metrics!=null) {
                     float input,submitted,mean,peak; metrics(out input,out submitted,out mean,out peak);
-                    GUILayout.Label(T("输入 / 提交帧率：","Input / submitted frame rate: ")+input.ToString("F1")+" / "+submitted.ToString("F1")+" FPS");
-                    GUILayout.Label(T("呈现处理时间（含同步等待）：","Presentation time (includes synchronization waits): ")+mean.ToString("F1")+" ms; "+T("峰值 ","peak ")+peak.ToString("F1")+" ms");
+                    GUILayout.Label(L10n.Get("dv_scaling/input_submitted_frame_rate")+input.ToString("F1")+" / "+submitted.ToString("F1")+" FPS");
+                    GUILayout.Label(L10n.Get("dv_scaling/presentation_time_includes_synchronization_waits")+mean.ToString("F1")+" ms; "+L10n.Get("dv_scaling/peak")+peak.ToString("F1")+" ms");
                 }
-                GUILayout.Label(active==1 && generated>0 ? T("已记录插帧；画质及延迟需实测。","Generated frames recorded; verify visual quality and latency.") : generated>0 ? T("插帧已暂停。","Frame generation paused.") : T("本次尚未记录生成帧。","No generated frames recorded in this session."));
-            } else GUILayout.Label(T("原生层未加载。开启插帧并保存后重启游戏；下次可照常启动。","Native layer absent. Enable frame generation, save, and restart normally."));
-            GUILayout.Label(AutoStartup.Installed ? T("普通启动接入已安装。","Automatic ordinary-launch integration installed.") : T("普通启动接入等待部署或重启。","Automatic launch integration awaiting deployment or restart."));
+                GUILayout.Label(active==1 && generated>0 ? L10n.Get("dv_scaling/generated_frames_recorded_verify_visual_quality_and_latency") : generated>0 ? L10n.Get("dv_scaling/frame_generation_paused") : L10n.Get("dv_scaling/no_generated_frames_recorded_in_this_session"));
+            } else GUILayout.Label(L10n.Get("dv_scaling/native_layer_absent_enable_frame_generation_save_and_restart"));
+            GUILayout.Label(AutoStartup.Installed ? L10n.Get("dv_scaling/automatic_ordinary_launch_integration_installed") : L10n.Get("dv_scaling/automatic_launch_integration_awaiting_deployment_or_restart"));
             if(AutoStartup.Error!=null) GUILayout.Label(AutoStartup.Error);
-            GUILayout.Label("Lossless.dll " + T("完整路径","full path")); settings.DllPath=GUILayout.TextField(settings.DllPath);
+            GUILayout.Label("Lossless.dll " + L10n.Get("dv_scaling/full_path")); settings.DllPath=GUILayout.TextField(settings.DllPath);
             if(string.IsNullOrEmpty(settings.DllPath) && Event.current.type==EventType.Repaint) {
                 var placeholder=new GUIStyle(GUI.skin.label);
                 placeholder.padding=GUI.skin.textField.padding;
@@ -158,17 +159,17 @@ namespace DVLSFG {
                 placeholder.normal.textColor=new Color(.75f,.75f,.75f,.65f);
                 GUI.Label(GUILayoutUtility.GetLastRect(),"C:/<YourLosslessScaling>/Lossless.dll",placeholder);
             }
-            GUILayout.BeginHorizontal(); GUILayout.Label(T("倍率：","Multiplier: ") + settings.Multiplier + "x");
+            GUILayout.BeginHorizontal(); GUILayout.Label(L10n.Get("dv_scaling/multiplier") + settings.Multiplier + "x");
             if(GUILayout.Button("2x")) settings.Multiplier=2;
             if(GUILayout.Button("3x")) settings.Multiplier=3;
             if(GUILayout.Button("4x")) settings.Multiplier=4; GUILayout.EndHorizontal();
-            settings.Performance=GUILayout.Toggle(settings.Performance,T("性能模型（需要对应着色器）","Performance model (requires matching shaders)"));
-            GUILayout.Label(T("光流分辨率比例：","Flow scale: ") + settings.FlowScale.ToString("0.00"));
+            settings.Performance=GUILayout.Toggle(settings.Performance,L10n.Get("dv_scaling/performance_model_requires_matching_shaders"));
+            GUILayout.Label(L10n.Get("dv_scaling/flow_scale") + settings.FlowScale.ToString("0.00"));
             settings.FlowScale=GUILayout.HorizontalSlider(settings.FlowScale,.25f,1f);
-            GUILayout.Label(T("倍率、模型和光流质量保存后生效。DLL 路径修改仍需重启。","Multiplier, model and flow quality apply on save. DLL path changes still require restart."));
-            if(GUILayout.Button(T("保存设置","Save settings"))) SaveSettings(entry);
-            if(loaded && capture!=null && GUILayout.Button(T("保存输入 / 生成帧对照图","Save input / generated frame comparison"))) capture();
-            if(GUILayout.Button(T("检查 DLL 兼容性","Check DLL compatibility")) && SaveSettings(entry)) {
+            GUILayout.Label(L10n.Get("dv_scaling/multiplier_model_and_flow_quality_apply_on_save_dll_path_cha"));
+            if(GUILayout.Button(L10n.Get("dv_scaling/save_settings"))) SaveSettings(entry);
+            if(loaded && capture!=null && GUILayout.Button(L10n.Get("dv_scaling/save_input_generated_frame_comparison"))) capture();
+            if(GUILayout.Button(L10n.Get("dv_scaling/check_dll_compatibility")) && SaveSettings(entry)) {
                 try {
                     var start=new ProcessStartInfo(Path.Combine(directory,"DVLSFG.Launcher.exe"),"--probe");
                     start.UseShellExecute=false; start.CreateNoWindow=true; start.WindowStyle=ProcessWindowStyle.Hidden;
@@ -178,8 +179,8 @@ namespace DVLSFG {
             string probe=Path.Combine(directory,"probe.log");
             if(File.Exists(probe)) { try { GUILayout.Label(File.ReadAllText(probe)); } catch(IOException) {} }
             if(!string.IsNullOrEmpty(error)) GUILayout.Label(error);
-            GUILayout.Label(T("启动：Steam 或原有游戏快捷方式即可。","Launch normally through Steam or your existing game shortcut."));
-            GUILayout.Label(T("卸载：先在 UMM 停用 DVLSFG，退出游戏等待自动移除启动接入，再删除模组。","Uninstall: disable in UMM, exit for automatic bootstrap removal, then remove the mod."));
+            GUILayout.Label(L10n.Get("dv_scaling/launch_normally_through_steam_or_your_existing_game_shortcut"));
+            GUILayout.Label(L10n.Get("dv_scaling/uninstall_disable_in_umm_exit_for_automatic_bootstrap_remova"));
         }
     }
 }

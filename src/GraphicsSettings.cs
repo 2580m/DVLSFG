@@ -24,9 +24,6 @@ namespace DVLSFG {
         float statusTimer;
         ScrollRect graphicsScroll;
         bool graphicsVisible;
-        internal static string Text(string zh,string en) {
-            return (LocalizationManager.CurrentLanguageCode ?? "").StartsWith("zh",StringComparison.OrdinalIgnoreCase) ? zh : en;
-        }
         static int Quality(Settings s) { return s.FsrMode>0 ? s.FsrMode : s.FsrQuality; }
         static Settings Copy(Settings s) { return new Settings { Enabled=s.Enabled,DllPath=s.DllPath,Multiplier=s.Multiplier,Performance=s.Performance,FlowScale=s.FlowScale,FsrMode=s.FsrMode,FsrQuality=Quality(s),FsrSharpness=s.FsrSharpness }; }
         internal bool Dirty { get { return pending!=null && (pending.Enabled!=Main.settings.Enabled || pending.Multiplier!=Main.settings.Multiplier || pending.Performance!=Main.settings.Performance || pending.FlowScale!=Main.settings.FlowScale || pending.FsrMode!=Main.settings.FsrMode || Quality(pending)!=Quality(Main.settings) || pending.FsrSharpness!=Main.settings.FsrSharpness); } }
@@ -91,20 +88,20 @@ namespace DVLSFG {
         internal string Description(int field) {
             switch(field) {
                 case 0:
-                    return Text("使用 LSFG 生成中间帧，首次启用需要重启游戏以加载插帧层。\n当前状态：","Generate intermediate frames with LSFG. Restart when first enabling to load the generation layer.\nCurrent status: ")
-                        +(failure ?? Main.GraphicsStatus)+(Dirty ? Text("（有未应用设置）"," (unapplied changes)") : "");
+                    return L10n.Get("dv_scaling/generate_intermediate_frames_with_lsfg_restart_when_first_en")
+                        +(failure ?? Main.GraphicsStatus)+(Dirty ? L10n.Get("dv_scaling/unapplied_changes") : "");
                 case 1:
-                    return Text("选择原始帧率的 2、3 或 4 倍作为生成目标，实际帧率取决于 GPU 性能。","Target 2, 3 or 4 times the original frame rate. Actual output depends on GPU performance.");
+                    return L10n.Get("dv_scaling/target_2_3_or_4_times_the_original_frame_rate_actual_output");
                 case 2:
-                    return Text("标准：侧重画质，GPU 计算开销较高。\n性能：降低计算开销，可能增加插帧伪影。","Standard: prioritizes image quality, with higher GPU compute cost.\nPerformance: reduces compute cost, with potentially more interpolation artifacts.");
+                    return L10n.Get("dv_scaling/standard_prioritizes_image_quality_with_higher_gpu_compute_c");
                 case 3:
-                    return Text("调整光流计算的分辨率比例。较高值保留更多运动细节；较低值降低 GPU 开销，但可能增加伪影。","Adjust optical flow resolution. Higher values retain more motion detail; lower values reduce GPU cost but may increase artifacts.");
+                    return L10n.Get("dv_scaling/adjust_optical_flow_resolution_higher_values_retain_more_mot");
                 case 6:
-                    return Text("选择超分辨率技术。FSR 1.0 使用 FidelityFX Super Resolution 将低分辨率场景放大到输出分辨率。\n当前渲染 / 输出：","Choose an upscaling technology. FSR 1.0 uses FidelityFX Super Resolution to upscale the scene to the output resolution.\nCurrent rendering / output: ")+FsrRuntime.Status;
+                    return L10n.Get("dv_scaling/choose_an_upscaling_technology_fsr_1_0_uses_fidelityfx_super")+FsrRuntime.Status;
                 case 7:
-                    return Text("调整 FSR 放大后的锐化强度。0% 关闭锐化，100% 为最强锐化；过高可能使边缘出现光晕。\n当前渲染 / 输出：","Adjust sharpening after FSR upscaling. 0% disables sharpening; 100% is strongest. Excessive sharpening can cause edge halos.\nCurrent rendering / output: ")+FsrRuntime.Status;
+                    return L10n.Get("dv_scaling/adjust_sharpening_after_fsr_upscaling_0_disables_sharpening")+FsrRuntime.Status;
                 case 8:
-                    return Text("调整超分辨率的画质与性能取舍。向右质量提高，向左渲染开销降低；关闭技术后仍保留所选档位。","Balance upscaling quality and performance. Move right for higher quality, left for lower rendering cost. The selected quality is retained when the technology is off.");
+                    return L10n.Get("dv_scaling/balance_upscaling_quality_and_performance_move_right_for_hig");
                 default: return "";
             }
         }
@@ -263,15 +260,15 @@ namespace DVLSFG {
             syncing=true;
             try {
                 language=LocalizationManager.CurrentLanguageCode;
-                Set(0,Text("帧生成","Frame generation"),new List<string>{Text("关闭","Off"),"LSFG 3.1"},pending.Enabled?1:0,true);
-                Set(1,Text("帧生成倍率","Frame generation multiplier"),new List<string>{"2x","3x","4x"},pending.Multiplier-2,pending.Enabled);
-                Set(2,Text("帧生成模型","Frame generation model"),new List<string>{Text("标准","Standard"),Text("性能","Performance")},pending.Performance?1:0,pending.Enabled);
+                Set(0,L10n.Get("dv_scaling/frame_generation"),new List<string>{L10n.Get("dv_scaling/off"),"LSFG 3.1"},pending.Enabled?1:0,true);
+                Set(1,L10n.Get("dv_scaling/frame_generation_multiplier"),new List<string>{"2x","3x","4x"},pending.Multiplier-2,pending.Enabled);
+                Set(2,L10n.Get("dv_scaling/frame_generation_model"),new List<string>{L10n.Get("dv_scaling/standard"),L10n.Get("dv_scaling/performance")},pending.Performance?1:0,pending.Enabled);
                 int scale=Mathf.Clamp(Mathf.RoundToInt(pending.FlowScale*4)-1,0,3);
-                Set(3,Text("光流质量","Optical flow quality"),new List<string>{"25%","50%","75%","100%"},scale,pending.Enabled);
-                Set(6,Text("超分辨率技术","Upscaling technology"),new List<string>{Text("关闭","Off"),"FSR 1.0"},pending.FsrMode>0 ? 1 : 0,true);
-                Set(8,Text("超分辨率质量","Upscaling quality"),new List<string>{Text("超级性能","Ultra Performance"),Text("性能","Performance"),Text("平衡","Balanced"),Text("质量","Quality"),Text("超级质量","Ultra Quality")},5-Quality(pending),pending.FsrMode>0);
+                Set(3,L10n.Get("dv_scaling/optical_flow_quality"),new List<string>{"25%","50%","75%","100%"},scale,pending.Enabled);
+                Set(6,L10n.Get("dv_scaling/upscaling_technology"),new List<string>{L10n.Get("dv_scaling/off"),"FSR 1.0"},pending.FsrMode>0 ? 1 : 0,true);
+                Set(8,L10n.Get("dv_scaling/upscaling_quality"),new List<string>{L10n.Get("dv_scaling/ultra_performance"),L10n.Get("dv_scaling/performance"),L10n.Get("dv_scaling/balanced"),L10n.Get("dv_scaling/quality"),L10n.Get("dv_scaling/ultra_quality")},5-Quality(pending),pending.FsrMode>0);
                 sharpnessSlider.ToggleInteractable(pending.FsrMode>0);
-                sharpnessLabel.text=Text("锐化强度","Sharpening");
+                sharpnessLabel.text=L10n.Get("dv_scaling/sharpening");
                 int percent=Mathf.RoundToInt(pending.FsrSharpness*100);
                 sharpnessSlider.SetValueWithoutNotify(percent);
                 sharpnessValue.text=percent+"%";
@@ -283,7 +280,7 @@ namespace DVLSFG {
             var previous=Main.settings;
             pending.DllPath=previous.DllPath;
             Main.settings=Copy(pending);
-            if(!Main.SaveSettings(Main.modEntry)) { Main.settings=previous; failure=Text("保存失败，请查看 UMM","Save failed; see UMM"); }
+            if(!Main.SaveSettings(Main.modEntry)) { Main.settings=previous; failure=L10n.Get("dv_scaling/save_failed_see_umm"); }
             else { Main.ApplyEnabled(); failure=null; }
             Refresh();
         }

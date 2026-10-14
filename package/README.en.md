@@ -1,4 +1,8 @@
-# DV LSFG 0.4.13 (experimental)
+# DV LSFG 0.4.14 (experimental)
+
+0.4.14 moves interface text to a bundled local `translations.csv` through DV Language
+Helper. Install and enable DVLangHelper. Language follows the game and helper
+translation overrides are supported. No online translation download is used.
 
 0.4.13 changes the installation directory and archive root to `Mods/dv-scaling`.
 Move the entire old `Mods/DVLSFG` directory to retain configuration when migrating;

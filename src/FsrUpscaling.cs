@@ -56,14 +56,14 @@ namespace DVLSFG {
         }
         internal static string Status {
             get {
-                if(!Requested) return GraphicsSettingsPanel.Text("已关闭","Off");
-                if(failure!=null) return GraphicsSettingsPanel.Text("不可用：","Unavailable: ")+failure;
+                if(!Requested) return L10n.Get("dv_scaling/off");
+                if(failure!=null) return L10n.Get("dv_scaling/unavailable")+failure;
                 foreach(var camera in Cameras) {
                     if(!camera.isActiveAndEnabled || !camera.Scene || !camera.Scene.enabled) continue;
                     string message=camera.Status;
                     if(message!=null) return message;
                 }
-                return GraphicsSettingsPanel.Text("等待游戏场景相机","Waiting for scene camera");
+                return L10n.Get("dv_scaling/waiting_for_scene_camera");
             }
         }
     }
@@ -90,7 +90,7 @@ namespace DVLSFG {
                 if(job==IntPtr.Zero) return null;
                 ulong frames; int state=FsrRuntime.DVFSR_Status(job,out frames);
                 if(state<0) return "FSR GPU error 0x"+state.ToString("X8");
-                return state==1 ? inputTarget.width+"×"+inputTarget.height+" → "+width+"×"+height : GraphicsSettingsPanel.Text("准备中","Preparing");
+                return state==1 ? inputTarget.width+"×"+inputTarget.height+" → "+width+"×"+height : L10n.Get("dv_scaling/preparing");
             }
         }
         void LateUpdate() {

@@ -8,6 +8,8 @@ using UnityModManagerNet;
 using DV.UI;
 using DV.UIFramework;
 using DVLSFG;
+using I2.Loc;
+using DV.Localization;
 namespace DVLSFGTests {
     public static class GraphicsUiSmoke {
         static DateTime deadline=DateTime.UtcNow.AddSeconds(8);
@@ -88,6 +90,23 @@ namespace DVLSFGTests {
                         }
                     }
                 } else if(stage==2) {
+                    string originalLanguage=LocalizationManager.CurrentLanguage;
+                    try {
+                        foreach(string language in new[]{"English","Chinese (Simplified)","German"}) {
+                            LocalizationManager.CurrentLanguage=language;
+                            AccessTools.Method(typeof(GraphicsSettingsPanel),"Refresh").Invoke(controller.GetComponent<GraphicsSettingsPanel>(),null);
+                            string label=language=="Chinese (Simplified)" ? "帧生成" : "Frame generation";
+                            if(LocalizationAPI.L("dv_scaling/frame_generation")!=label || rows[0].GetLabelTMPro().text!=label) throw new Exception("CSV/API language switch failed: "+language);
+                            string quality=language=="Chinese (Simplified)" ? "超级性能" : "Ultra Performance";
+                            if(rows[8].GetValues()[0]!=quality) throw new Exception("CSV quality localization failed: "+language);
+                            string help=rows[2].GetComponent<UIElementTooltip>().GetText();
+                            if(help.Split('\n').Length!=2 || !help.StartsWith(language=="Chinese (Simplified)" ? "标准：" : "Standard:")) throw new Exception("Multiline CSV description failed: "+language);
+                        }
+                        entry.Logger.Log("LOCALIZATION PASS: game API, English/Chinese switching, German English fallback, quality labels and multiline descriptions");
+                    } finally {
+                        LocalizationManager.CurrentLanguage=originalLanguage;
+                        AccessTools.Method(typeof(GraphicsSettingsPanel),"Refresh").Invoke(controller.GetComponent<GraphicsSettingsPanel>(),null);
+                    }
                     var scroll=rows[0].GetComponentInParent<ScrollRect>();
                     scroll.verticalNormalizedPosition=1;
                     CheckBlankScroll(scroll,(RectTransform)rows[0].transform.parent.GetChild(7));
