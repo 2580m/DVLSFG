@@ -4,6 +4,8 @@ layout(binding=0) uniform sampler2D scene;
 layout(binding=1) uniform sampler2D uiBlack;
 layout(binding=2) uniform sampler2D uiWhite;
 layout(binding=3,rgba16f) writeonly uniform image2D outputImage;
+layout(binding=4) uniform sampler2D completeGame;
+layout(binding=5) uniform sampler2D presented;
 layout(push_constant) uniform Parameters {uint mode;};
 vec3 encode(vec3 v) {return mix(12.92*v,1.055*pow(max(v,0.0),vec3(1.0/2.4))-.055,greaterThan(v,vec3(.0031308)));}
 vec3 decode(vec3 v) {return mix(v/12.92,pow(max((v+.055)/1.055,0.0),vec3(2.4)),greaterThan(v,vec3(.04045)));}
@@ -19,5 +21,12 @@ void main() {
     bool realScene=(mode&4)!=0;
     vec3 background=texelFetch(scene,realScene ? uiPixel : p,0).rgb;
     vec3 color=black+(!realScene && encoded ? decode(background) : background)*transmission;
+    // Preserve overlays injected after Unity finished rendering. They are absent
+    // from completeGame, unlike the game's own UI, and must never enter optical flow.
+    vec3 observed=texelFetch(presented,p,0).rgb;
+    if(encoded) observed=decode(observed);
+    vec3 reference=texelFetch(completeGame,uiPixel,0).rgb;
+    vec3 difference=abs(observed-reference);
+    if(max(max(difference.r,difference.g),difference.b)>.02) color=observed;
     imageStore(outputImage,p,vec4(encoded ? encode(color) : color,1.0));
 }

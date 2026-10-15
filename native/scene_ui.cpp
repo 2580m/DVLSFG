@@ -33,7 +33,7 @@ std::shared_ptr<const DVLSFG::SceneUiFrame> temporal;
 // The standalone Vulkan regression host opts into the legacy complete-frame path.
 std::atomic<bool> requested{GetEnvironmentVariableW(L"DVLSFG_TEST_HOST",nullptr,0)==0};
 std::atomic<unsigned long long> serial{0};
-struct Resources {std::array<ComPtr<ID3D11Texture2D>,3> textures; std::array<ComPtr<InteropSurface>,3> surfaces; ComPtr<InteropDevice> device;};
+struct Resources {std::array<ComPtr<ID3D11Texture2D>,4> textures; std::array<ComPtr<InteropSurface>,4> surfaces; ComPtr<InteropDevice> device;};
 std::mutex retiredMutex;
 std::vector<Resources*> retired;
 void drainRetired() {
@@ -62,7 +62,7 @@ void __stdcall event(int kind,void* data) {
     try {
         auto& r=*job->resources;
         if(!r.device) {
-            for(size_t i=0;i<(kind==4 ? 2 : 3);++i) if(FAILED(r.textures[i].As(&r.surfaces[i]))) throw std::runtime_error("DXVK surface interop unavailable");
+            for(size_t i=0;i<(kind==4 ? 2 : 4);++i) if(FAILED(r.textures[i].As(&r.surfaces[i]))) throw std::runtime_error("DXVK surface interop unavailable");
             if(FAILED(r.surfaces[0]->GetDevice(&r.device))) throw std::runtime_error("DXVK device interop unavailable");
         }
         // This callback runs after the UI render commands on Unity's render thread.
@@ -70,8 +70,8 @@ void __stdcall event(int kind,void* data) {
         r.device->FlushRenderingCommands();
         auto frame=std::make_shared<DVLSFG::SceneUiFrame>();
         r.device->GetVulkanHandles(nullptr,nullptr,&frame->device);
-        std::array<DVLSFG::SceneUiFrame::Image*,3> images=kind==4 ? std::array<DVLSFG::SceneUiFrame::Image*,3>{&frame->depth,&frame->motion,nullptr} : std::array<DVLSFG::SceneUiFrame::Image*,3>{&frame->scene,&frame->black,&frame->white};
-        for(size_t i=0;i<(kind==4 ? 2 : 3);++i) {
+        std::array<DVLSFG::SceneUiFrame::Image*,4> images=kind==4 ? std::array<DVLSFG::SceneUiFrame::Image*,4>{&frame->depth,&frame->motion,nullptr,nullptr} : std::array<DVLSFG::SceneUiFrame::Image*,4>{&frame->scene,&frame->black,&frame->white,&frame->complete};
+        for(size_t i=0;i<(kind==4 ? 2 : 4);++i) {
             VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
             if(FAILED(r.surfaces[i]->GetVulkanImageInfo(&images[i]->image,&images[i]->layout,&info)) || info.samples!=VK_SAMPLE_COUNT_1_BIT || !(info.usage&VK_IMAGE_USAGE_SAMPLED_BIT)) throw std::runtime_error("Invalid UI capture texture");
             // DXVK may allocate an R16G16B16A16_UNORM typeless base image for
@@ -113,10 +113,10 @@ extern "C" __declspec(dllexport) void __cdecl DVLSFG_SetSceneUiEnabled(int value
     if(!value) {std::lock_guard guard(frameMutex); latest.reset();}
 }
 extern "C" __declspec(dllexport) void* __cdecl DVLSFG_GetSceneUiEvent() {return reinterpret_cast<void*>(&event);}
-extern "C" __declspec(dllexport) void* __cdecl DVLSFG_CreateSceneUi(void* scene,void* black,void* white) {
-    if(!scene || !black || !white) return nullptr;
+extern "C" __declspec(dllexport) void* __cdecl DVLSFG_CreateSceneUi(void* scene,void* black,void* white,void* complete) {
+    if(!scene || !black || !white || !complete) return nullptr;
     auto job=new(std::nothrow) Job; if(!job) return nullptr;
-    job->resources->textures={static_cast<ID3D11Texture2D*>(scene),static_cast<ID3D11Texture2D*>(black),static_cast<ID3D11Texture2D*>(white)};
+    job->resources->textures={static_cast<ID3D11Texture2D*>(scene),static_cast<ID3D11Texture2D*>(black),static_cast<ID3D11Texture2D*>(white),static_cast<ID3D11Texture2D*>(complete)};
     return job;
 }
 extern "C" __declspec(dllexport) int __cdecl DVLSFG_SceneUiStatus(void* handle,unsigned long long* frames) {
@@ -138,7 +138,7 @@ std::shared_ptr<const SceneUiFrame> acquireSceneUi(VkDevice device,VkExtent2D ex
     return latest;
 }
 struct UiComposite::State {
-    VkDevice device{}; VkExtent2D extent{}; Mini::Image output;
+    VkDevice device{}; VkExtent2D extent{}; Mini::Image output,presented;
     bool encoded=true;
     bool bindingsReady=false;
     VkSampler sampler{}; VkDescriptorSetLayout setLayout{}; VkPipelineLayout layout{}; VkPipeline pipeline{}; VkDescriptorPool pool{};
@@ -168,11 +168,12 @@ UiComposite::UiComposite(VkDevice device,VkPhysicalDevice physical,VkExtent2D ex
     auto& s=*state; s.device=device; s.extent=extent;
     s.encoded=swapchainFormat!=VK_FORMAT_B8G8R8A8_SRGB && swapchainFormat!=VK_FORMAT_R8G8B8A8_SRGB;
     HANDLE handle{}; s.output=Mini::Image(device,physical,extent,VK_FORMAT_R16G16B16A16_SFLOAT,VK_IMAGE_USAGE_STORAGE_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&handle);
+    s.presented=Mini::Image(device,physical,extent,VK_FORMAT_R16G16B16A16_SFLOAT,VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&handle);
     VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO}; sampler.magFilter=sampler.minFilter=VK_FILTER_NEAREST; sampler.addressModeU=sampler.addressModeV=sampler.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     State::check(s.fn<PFN_vkCreateSampler>("vkCreateSampler")(device,&sampler,nullptr,&s.sampler));
-    std::array<VkDescriptorSetLayoutBinding,4> bindings{};
-    for(uint32_t i=0;i<4;++i) bindings[i]={i,i==3 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_COMPUTE_BIT,nullptr};
-    VkDescriptorSetLayoutCreateInfo desc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO}; desc.bindingCount=4; desc.pBindings=bindings.data();
+    std::array<VkDescriptorSetLayoutBinding,6> bindings{};
+    for(uint32_t i=0;i<6;++i) bindings[i]={i,i==3 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_COMPUTE_BIT,nullptr};
+    VkDescriptorSetLayoutCreateInfo desc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO}; desc.bindingCount=6; desc.pBindings=bindings.data();
     State::check(s.fn<PFN_vkCreateDescriptorSetLayout>("vkCreateDescriptorSetLayout")(device,&desc,nullptr,&s.setLayout));
     VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(uint32_t)};
     VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO}; layout.setLayoutCount=1; layout.pSetLayouts=&s.setLayout; layout.pushConstantRangeCount=1; layout.pPushConstantRanges=&push;
@@ -188,22 +189,24 @@ void UiComposite::prepare(const SceneUiFrame& frame,const std::vector<VkImage>& 
     if(s.bindingsReady && s.retained==frame.resources && s.sets.size()==generated.size()+1) return;
     s.clearBindings(); s.retained=frame.resources;
     auto count=static_cast<uint32_t>(generated.size()+1);
-    std::array<VkDescriptorPoolSize,2> sizes{{{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,count*3},{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,count}}};
+    std::array<VkDescriptorPoolSize,2> sizes{{{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,count*5},{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,count}}};
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO}; pool.maxSets=count; pool.poolSizeCount=2; pool.pPoolSizes=sizes.data();
     State::check(s.fn<PFN_vkCreateDescriptorPool>("vkCreateDescriptorPool")(s.device,&pool,nullptr,&s.pool));
     std::vector<VkDescriptorSetLayout> layouts(count,s.setLayout); s.sets.resize(count);
     VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO}; alloc.descriptorPool=s.pool; alloc.descriptorSetCount=count; alloc.pSetLayouts=layouts.data();
     State::check(s.fn<PFN_vkAllocateDescriptorSets>("vkAllocateDescriptorSets")(s.device,&alloc,s.sets.data()));
     auto black=s.view(frame.black.image,frame.black.format),white=s.view(frame.white.image,frame.white.format),output=s.view(s.output.handle(),VK_FORMAT_R16G16B16A16_SFLOAT);
+    auto complete=s.view(frame.complete.image,frame.complete.format),presented=s.view(s.presented.handle(),VK_FORMAT_R16G16B16A16_SFLOAT);
     for(uint32_t i=0;i<count;++i) {
         auto source=i<generated.size() ? generated[i] : frame.scene.image;
-        std::array<VkDescriptorImageInfo,4> info{{{s.sampler,s.view(source,VK_FORMAT_R16G16B16A16_SFLOAT),VK_IMAGE_LAYOUT_GENERAL},{s.sampler,black,VK_IMAGE_LAYOUT_GENERAL},{s.sampler,white,VK_IMAGE_LAYOUT_GENERAL},{VK_NULL_HANDLE,output,VK_IMAGE_LAYOUT_GENERAL}}};
-        std::array<VkWriteDescriptorSet,4> writes{};
-        for(uint32_t j=0;j<4;++j) {writes[j]={VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}; writes[j].dstSet=s.sets[i]; writes[j].dstBinding=j; writes[j].descriptorCount=1; writes[j].descriptorType=j==3 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; writes[j].pImageInfo=&info[j];}
-        s.fn<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(s.device,4,writes.data(),0,nullptr);
+        std::array<VkDescriptorImageInfo,6> info{{{s.sampler,s.view(source,VK_FORMAT_R16G16B16A16_SFLOAT),VK_IMAGE_LAYOUT_GENERAL},{s.sampler,black,VK_IMAGE_LAYOUT_GENERAL},{s.sampler,white,VK_IMAGE_LAYOUT_GENERAL},{VK_NULL_HANDLE,output,VK_IMAGE_LAYOUT_GENERAL},{s.sampler,complete,VK_IMAGE_LAYOUT_GENERAL},{s.sampler,presented,VK_IMAGE_LAYOUT_GENERAL}}};
+        std::array<VkWriteDescriptorSet,6> writes{};
+        for(uint32_t j=0;j<6;++j) {writes[j]={VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}; writes[j].dstSet=s.sets[i]; writes[j].dstBinding=j; writes[j].descriptorCount=1; writes[j].descriptorType=j==3 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; writes[j].pImageInfo=&info[j];}
+        s.fn<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(s.device,6,writes.data(),0,nullptr);
     }
     s.bindingsReady=true;
 }
+VkImage UiComposite::presentedImage() const {return state->presented.handle();}
 VkImage UiComposite::record(VkCommandBuffer command,size_t index,bool sceneOnly,bool realScene) {
     auto& s=*state;
     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}; b.image=s.output.handle(); b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_GENERAL; b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b.srcAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};

@@ -177,10 +177,17 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     if(capture && !ui) inputCapture.record(before.handle(),swapchainImages.at(index));
     VkImage sceneInput=swapchainImages.at(index);
     if(ui) {
-        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+        // Save late Vulkan overlays before replacing the application's real image.
+        auto presented=uiComposite->presentedImage();
+        barrier(before.handle(),presented,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+        blit(before.handle(),swapchainImages.at(index),presented,extent);
+        barrier(before.handle(),presented,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
+            VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+        for(auto image:{ui->scene,ui->black,ui->white,ui->complete}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
         sceneInput=uiComposite->record(before.handle(),out_n.size(),true);
-        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+        for(auto image:{ui->scene,ui->black,ui->white,ui->complete}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
     }
     std::array<VkImage,2> frames{frame_0.handle(),frame_1.handle()};
@@ -204,10 +211,10 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     if(ui) {
         // Use the same antialiased UI for the real frame too; alternating native
         // single-sample UI with resolved UI would make its edges shimmer.
-        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+        for(auto image:{ui->scene,ui->black,ui->white,ui->complete}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
         auto real=uiComposite->record(before.handle(),out_n.size(),false,true);
-        for(auto image:{ui->scene,ui->black,ui->white}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+        for(auto image:{ui->scene,ui->black,ui->white,ui->complete}) barrier(before.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
         barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -257,10 +264,10 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_READ_BIT);
         VkImage generated=out_n[i].handle();
         if(ui) {
-            for(auto image:{ui->black,ui->white}) barrier(copy.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+            for(auto image:{ui->black,ui->white,ui->complete}) barrier(copy.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
             generated=uiComposite->record(copy.handle(),i);
-            for(auto image:{ui->black,ui->white}) barrier(copy.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+            for(auto image:{ui->black,ui->white,ui->complete}) barrier(copy.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
                 VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
         }
         barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,

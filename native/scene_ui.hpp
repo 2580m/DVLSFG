@@ -7,7 +7,7 @@ struct SceneUiFrame {
     struct Image { VkImage image{}; VkImageLayout layout{}; VkFormat format{}; };
     VkDevice device{};
     VkExtent2D extent{};
-    Image scene,black,white;
+    Image scene,black,white,complete;
     Image depth,motion;
     VkExtent2D renderExtent{};
     float jitterX{},jitterY{},deltaMs{},nearPlane{},farPlane{},fov{};
@@ -25,6 +25,7 @@ class UiComposite {
 public:
     UiComposite(VkDevice device,VkPhysicalDevice physical,VkExtent2D extent,VkFormat swapchainFormat);
     void prepare(const SceneUiFrame& frame,const std::vector<VkImage>& generated);
+    VkImage presentedImage() const;
     VkImage record(VkCommandBuffer command,size_t generatedIndex,bool sceneOnly=false,bool realScene=false);
 };
 }

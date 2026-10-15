@@ -1,12 +1,12 @@
 param(
-    [ValidateSet('Synthetic','World','Ui','Pacing','Fsr3','Fsr3World','SceneUi','FsrFg','FsrFgWorld','UpscalingText')][string]$Kind,
+    [ValidateSet('Synthetic','World','Ui','Pacing','Fsr3','Fsr3World','SceneUi','FsrFg','FsrFgWorld','UpscalingText','GraphicsArrows')][string]$Kind,
     [string]$GameDirectory='W:\SteamLibrary\steamapps\common\Derail Valley'
 )
 $ErrorActionPreference='Stop'
 if(Get-Process DerailValley -ErrorAction SilentlyContinue) {throw 'Exit the game before installing a test fixture.'}
 $project=Split-Path $PSScriptRoot -Parent
-$identity=@{Synthetic='FsrTest';World='FsrWorldTest';Ui='GraphicsTest';Pacing='PacingTest';Fsr3='Fsr3Test';Fsr3World='Fsr3WorldTest';SceneUi='SceneUiTest';FsrFg='FsrFgTest';FsrFgWorld='FsrFgWorldTest';UpscalingText='UpscalingTextTest'}[$Kind]
-$source=@{Synthetic='FsrSmoke';World='FsrWorldSmoke';Ui='GraphicsUiSmoke';Pacing='PacingSmoke';Fsr3='Fsr3Smoke';Fsr3World='Fsr3WorldSmoke';SceneUi='SceneUiSmoke';FsrFg='FsrFrameGenerationSmoke';FsrFgWorld='FsrFrameGenerationWorldSmoke';UpscalingText='UpscalingTextSmoke'}[$Kind]
+$identity=@{Synthetic='FsrTest';World='FsrWorldTest';Ui='GraphicsTest';Pacing='PacingTest';Fsr3='Fsr3Test';Fsr3World='Fsr3WorldTest';SceneUi='SceneUiTest';FsrFg='FsrFgTest';FsrFgWorld='FsrFgWorldTest';UpscalingText='UpscalingTextTest';GraphicsArrows='GraphicsArrowTest'}[$Kind]
+$source=@{Synthetic='FsrSmoke';World='FsrWorldSmoke';Ui='GraphicsUiSmoke';Pacing='PacingSmoke';Fsr3='Fsr3Smoke';Fsr3World='Fsr3WorldSmoke';SceneUi='SceneUiSmoke';FsrFg='FsrFrameGenerationSmoke';FsrFgWorld='FsrFrameGenerationWorldSmoke';UpscalingText='UpscalingTextSmoke';GraphicsArrows='GraphicsArrowSmoke'}[$Kind]
 $fixture=Join-Path $GameDirectory ('Mods/DVLSFG.'+$identity)
 New-Item -ItemType Directory $fixture -Force | Out-Null
 @{Id='DVLSFG.'+$identity;DisplayName='Temporary DVLSFG '+$Kind+' test';Version='1.0.0';ManagerVersion='0.27.3';Requirements=@('DVLSFG');AssemblyName=$identity+'.dll';EntryMethod='DVLSFGTests.'+$source+'.Load'} | ConvertTo-Json | Set-Content (Join-Path $fixture 'Info.json')

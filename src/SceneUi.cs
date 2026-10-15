@@ -13,7 +13,7 @@ namespace DVLSFG {
     internal static class SceneUiRuntime {
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_SetSceneUiEnabled(int enabled);
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] internal static extern IntPtr DVLSFG_GetSceneUiEvent();
-        [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] internal static extern IntPtr DVLSFG_CreateSceneUi(IntPtr scene,IntPtr black,IntPtr white);
+        [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] internal static extern IntPtr DVLSFG_CreateSceneUi(IntPtr scene,IntPtr black,IntPtr white,IntPtr complete);
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] internal static extern int DVLSFG_SceneUiStatus(IntPtr job,out ulong frames);
         static SceneUiCapture capture;
         internal static readonly List<SceneUiSceneCamera> Cameras=new List<SceneUiSceneCamera>();
@@ -66,7 +66,7 @@ namespace DVLSFG {
         }
     }
     public sealed class SceneUiCapture : MonoBehaviour {
-        RenderTexture scene,black,white,uiMsaa;
+        RenderTexture scene,black,white,complete,uiMsaa;
         int uiSamples,requestedUiSamples;
         Camera uiCamera;
         IntPtr job,callback;
@@ -80,6 +80,8 @@ namespace DVLSFG {
         readonly List<LayerState> layers=new List<LayerState>();
         readonly HashSet<Canvas> roots=new HashSet<Canvas>();
         readonly List<Transform> children=new List<Transform>();
+        readonly List<RendererState> renderers=new List<RendererState>();
+        struct RendererState {internal CanvasRenderer Renderer; internal bool Culled;}
         struct LayerState {internal GameObject Object; internal int Layer;}
         struct CanvasState {
             internal Canvas Canvas; internal Camera Camera; internal float Distance; internal RenderMode Mode;
@@ -104,6 +106,7 @@ namespace DVLSFG {
         }
         void Create() {
             scene=Target("DV Scaling scene without screen UI"); black=Target("DV Scaling UI over black"); white=Target("DV Scaling UI over white");
+            complete=Target("DV Scaling complete game frame before external overlays");
             requestedUiSamples=Mathf.Max(4,QualitySettings.antiAliasing); uiSamples=UiSampleCount(requestedUiSamples);
             uiMsaa=new RenderTexture(Screen.width,Screen.height,24,RenderTextureFormat.ARGBHalf,RenderTextureReadWrite.Linear) {name="DV Scaling antialiased UI",antiAliasing=uiSamples};
             if(!uiMsaa.Create()) throw new InvalidOperationException("UI MSAA allocation failed");
@@ -112,7 +115,7 @@ namespace DVLSFG {
             uiCamera.nearClipPlane=.1f; uiCamera.farClipPlane=100; uiCamera.cullingMask=1<<31; uiCamera.clearFlags=CameraClearFlags.SolidColor; uiCamera.allowHDR=true; uiCamera.allowMSAA=true;
             callback=SceneUiRuntime.DVLSFG_GetSceneUiEvent();
             publish=new CommandBuffer {name="DV Scaling publish scene/UI"};
-            job=SceneUiRuntime.DVLSFG_CreateSceneUi(scene.GetNativeTexturePtr(),black.GetNativeTexturePtr(),white.GetNativeTexturePtr());
+            job=SceneUiRuntime.DVLSFG_CreateSceneUi(scene.GetNativeTexturePtr(),black.GetNativeTexturePtr(),white.GetNativeTexturePtr(),complete.GetNativeTexturePtr());
             if(job==IntPtr.Zero || callback==IntPtr.Zero) throw new InvalidOperationException("Scene/UI native bridge allocation failed");
         }
         IEnumerator Start() {
@@ -121,7 +124,11 @@ namespace DVLSFG {
                 yield return end;
                 if(!SceneUiRuntime.Active || failed || job==IntPtr.Zero) continue;
                 try {
-                    if(capturedFrame!=Time.frameCount || !RenderUi()) {Publish(3); continue;}
+                    if(capturedFrame!=Time.frameCount) {Publish(3); continue;}
+                    // Capture before temporary Canvas changes and external present hooks.
+                    // This reference separates RTSS/other late overlays from game content.
+                    ScreenCapture.CaptureScreenshotIntoRenderTexture(complete);
+                    if(!RenderUi()) {Publish(3); continue;}
                     Publish(1);
                     ulong frames;
                     if(SceneUiRuntime.DVLSFG_SceneUiStatus(job,out frames)<0) throw new InvalidOperationException("DXVK scene/UI interop failed; see native status");
@@ -130,7 +137,7 @@ namespace DVLSFG {
         }
         void Publish(int kind) {publish.Clear(); publish.IssuePluginEventAndData(callback,kind,job); Graphics.ExecuteCommandBuffer(publish);}
         bool RenderUi() {
-            canvases.Clear(); layers.Clear(); roots.Clear();
+            canvases.Clear(); layers.Clear(); renderers.Clear(); roots.Clear();
             // Enumerate the UI's own live registry; no per-frame global Unity scan.
             var registry=(IDictionary)Registry.GetValue(GraphicRegistry.instance);
             foreach(Canvas registered in registry.Keys) {
@@ -152,7 +159,11 @@ namespace DVLSFG {
             try {
                 foreach(var saved in canvases) {
                     children.Clear(); saved.Canvas.GetComponentsInChildren<Transform>(true,children);
-                    foreach(var child in children) {layers.Add(new LayerState {Object=child.gameObject,Layer=child.gameObject.layer}); child.gameObject.layer=31;}
+                    foreach(var child in children) {
+                        layers.Add(new LayerState {Object=child.gameObject,Layer=child.gameObject.layer}); child.gameObject.layer=31;
+                        var renderer=child.GetComponent<CanvasRenderer>();
+                        if(renderer) renderers.Add(new RendererState {Renderer=renderer,Culled=renderer.cull});
+                    }
                     saved.Canvas.renderMode=RenderMode.ScreenSpaceCamera; saved.Canvas.worldCamera=uiCamera; saved.Canvas.planeDistance=1;
                 }
                 Canvas.ForceUpdateCanvases();
@@ -170,6 +181,8 @@ namespace DVLSFG {
                 }
                 foreach(var saved in layers) if(saved.Object) saved.Object.layer=saved.Layer;
                 Canvas.ForceUpdateCanvases();
+                // Temporary camera-space clipping must not leak into the native UI.
+                foreach(var saved in renderers) if(saved.Renderer) saved.Renderer.cull=saved.Culled;
             }
             return true;
         }
@@ -180,6 +193,7 @@ namespace DVLSFG {
             if(uiCamera) {Destroy(uiCamera.gameObject); uiCamera=null;}
             if(scene) Destroy(scene); if(black) Destroy(black); if(white) Destroy(white); scene=black=white=null;
             if(uiMsaa) Destroy(uiMsaa); uiMsaa=null;
+            if(complete) Destroy(complete); complete=null;
         }
         internal void ResetCapture() {Clear(); failed=false;}
         void OnDestroy() {Clear();}

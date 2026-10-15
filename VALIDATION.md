@@ -725,3 +725,22 @@ names, complete title, bounded scrolling, 18.22-unit title gap, 8-unit arrow gap
 and a 200.02-unit value viewport in the tested layout. Movement and short-name
 reset assertions passed. Screenshots confirmed that text stays inside the value
 area and the title/arrows remain clear. Test choices were not applied.
+# External OSD and selector rendering (2026-10-15)
+
+The scene/UI bridge now also exports Unity's complete frame before external
+present hooks. The compositor compares it with a saved application swapchain
+image and preserves late overlays on both real and generated frames, without
+feeding them into optical flow. Temporary UI rendering restores CanvasRenderer
+culling flags after returning canvases and layers to their original state.
+
+The actual-game FSR frame-generation fixture passed FSR upscaling off/1/3,
+opaque/translucent UI pixel equality, resolved UI edges, moving-scene differences,
+depth/motion inputs, resize, UMM bypass and camera-space UI bypass. A captured
+generated frame visibly includes the user's RTSS OSD. The 600x90 OSD region
+matches its real-frame counterpart with maximum RGB byte error 0.
+
+`GraphicsArrows` opens the game's actual settings, temporarily tests their native
+selectors as overlay UI over a synthetic FSR scene, checks generation advances,
+and checks six native arrow icons (114–126 bright pixels each in the tested capture). Test screenshots and logs are
+archived locally under `build/overlay-arrow-validation`; temporary fixture mods
+are removed after testing. User configuration and game preferences are restored.
