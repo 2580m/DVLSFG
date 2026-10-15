@@ -4,7 +4,7 @@
 
 **让 Derail Valley 的原生图形设置拥有帧生成与超分辨率。**
 
-<a href="package/Info.json"><img src="https://img.shields.io/badge/version-0.6.1-6366f1?style=flat-square" alt="Version 0.6.1"></a>
+<a href="package/Info.json"><img src="https://img.shields.io/badge/version-0.6.2-6366f1?style=flat-square" alt="Version 0.6.2"></a>
 <img src="https://img.shields.io/badge/status-Beta-f59e0b?style=flat-square" alt="Beta">
 <img src="https://img.shields.io/badge/platform-Windows_x64-0078d4?style=flat-square" alt="Windows x64">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" alt="MIT license"></a>
@@ -50,7 +50,7 @@ DV Scaling 是独立的 Unity Mod Manager 模组。所有设置集成在游戏�
 ### 开始使用
 
 1. 退出游戏，安装并启用前置依赖，确保 DVVulkan 已完成 DXVK 部署。
-2. 将 `dv-scaling-0.6.1.zip` 拖入 UMM 安装。安装包可使用发布版本，或按下方开发说明自行构建。
+2. 将 `dv-scaling-0.6.2.zip` 拖入 UMM 安装。安装包可使用发布版本，或按下方开发说明自行构建。
 3. 启动游戏，在 UMM 中启用 **DV Scaling (Beta)**。使用 LSFG 帧生成时，填写自己的 `Lossless.dll` 完整路径并保存，执行“检查 DLL 兼容性”。
 4. 在 **设置 → 图形质量**选择帧生成或超分辨率技术，调整质量与锐化，点击**应用**。
 5. 首次启用帧生成后，正常退出游戏，等待自动部署完成，再从 Steam 或原有快捷方式启动。
@@ -104,7 +104,7 @@ UMM 内部 ID 仍为 `DVLSFG`，用于保留启用状态和依赖关系。
 
 将游戏路径替换为自己的安装位置；Vulkan SDK 路径不同时，可传入 `-VulkanSdk`。
 
-输出目录为 `dist/dv-scaling`，当前安装包为 `dist/dv-scaling-0.6.1.zip`。安装后的模组不需要编辑器或着色器编译器。
+输出目录为 `dist/dv-scaling`，当前安装包为 `dist/dv-scaling-0.6.2.zip`。安装后的模组不需要编辑器或着色器编译器。
 
 `port.ps1` 从固定版本的上游生成 Windows 移植代码，输出到 `build/port`。修改移植规则或原生源码，不要直接编辑生成文件。迁移项目目录后，需要重新生成原生 CMake 构建目录，避免沿用旧的绝对路径缓存。
 

@@ -4,7 +4,7 @@
 
 **Frame generation and upscaling in Derail Valley's native graphics settings.**
 
-<a href="package/Info.json"><img src="https://img.shields.io/badge/version-0.6.1-6366f1?style=flat-square" alt="Version 0.6.1"></a>
+<a href="package/Info.json"><img src="https://img.shields.io/badge/version-0.6.2-6366f1?style=flat-square" alt="Version 0.6.2"></a>
 <img src="https://img.shields.io/badge/status-Beta-f59e0b?style=flat-square" alt="Beta">
 <img src="https://img.shields.io/badge/platform-Windows_x64-0078d4?style=flat-square" alt="Windows x64">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" alt="MIT license"></a>
@@ -50,7 +50,7 @@ Upscaling quality increases from left to right: **Ultra Performance → Performa
 ### Getting started
 
 1. Exit the game. Install and enable the dependencies, and make sure DVVulkan has finished deploying DXVK.
-2. Drag `dv-scaling-0.6.1.zip` into UMM. Use a release package or build one using the development instructions below.
+2. Drag `dv-scaling-0.6.2.zip` into UMM. Use a release package or build one using the development instructions below.
 3. Launch the game and enable **DV Scaling (Beta)** in UMM. For LSFG, enter the full path to your own `Lossless.dll`, save, and run the DLL compatibility check.
 4. Open **Settings → Graphics**, choose a frame generation or upscaling technology, adjust quality and sharpening, and select **Apply**.
 5. After first enabling frame generation, exit the game normally, wait for automatic deployment to finish, then launch through Steam or your existing shortcut.
@@ -104,7 +104,7 @@ Run commands from the `dv-scaling` project root. Building requires:
 
 Replace the game path with your installation location. Pass `-VulkanSdk` if your Vulkan SDK is installed elsewhere.
 
-Build output goes to `dist/dv-scaling`; the current package is `dist/dv-scaling-0.6.1.zip`. The installed mod does not require the Unity editor or shader compilers.
+Build output goes to `dist/dv-scaling`; the current package is `dist/dv-scaling-0.6.2.zip`. The installed mod does not require the Unity editor or shader compilers.
 
 `port.ps1` generates the Windows port from pinned upstream revisions into `build/port`. Edit the port rules or native sources rather than generated files. After moving the project directory, regenerate the native CMake build directory to avoid stale absolute paths.
 
