@@ -9,6 +9,8 @@
 <img src="https://img.shields.io/badge/platform-Windows_x64-0078d4?style=flat-square" alt="Windows x64">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" alt="MIT license"></a>
 
+**简体中文** · [English](README_EN.md)
+
 [中文使用指南](package/README.zh-CN.md) · [English Guide](package/README.en.md) · [验证记录](VALIDATION.md) · [源码与许可](UPSTREAM.md)
 
 </div>
