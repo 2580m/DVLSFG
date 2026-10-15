@@ -1089,3 +1089,50 @@ Evidence, per-frame logs, independent PresentMon traces and original user-data
 backups are kept locally in ignored `build/zoom-history-optimization`. The
 temporary fixture is archived and original user files/configuration restored
 after validation. Only the tested reset policy and FG diagnostic flag ship.
+
+## Fixed-view frame generation cost attribution (2026-10-15)
+
+Added an opt-in `throughput-live.txt` world fixture and independent PresentMon
+collection/analysis tools. The probe updates the game's actual FrameLimit
+preference and invokes FrameLimiter, rather than relying on an application
+target that the native limiter can overwrite. Source samples use Windows QPC,
+matching PresentMon; Mono Stopwatch's process-relative clock is unsuitable for
+that correlation. CPU durations still use Stopwatch.
+
+RTX 3070 Ti, 1920x1080, FSR 3.1 SR balanced, FSR FG 2x, fixed camera, vSync=0:
+
+| Stage | Source FPS | Submitted FPS | Displayed FPS | UI CPU ms/source |
+| --- | ---: | ---: | ---: | ---: |
+| FG off, settled | 134.67 | 134.64 | 133.46 | 0 |
+| FG on, settled | 84.66 | 169.31 | 157.07 | 2.028 |
+| FG off, repeat | 127.33 | 127.36 | 126.19 | 0 |
+| FG on, repeat | 84.55 | 169.11 | 157.38 | 2.016 |
+| FG on, reuse existing UI capture (diagnostic only) | 109.03 | 216.88 | 163.96 | 0.015 |
+| FG on, native 60 FPS source limit | 58.91 | 117.83 | 117.49 | 2.106 |
+
+The frozen-UI ablation skips RenderUi only: current scene, depth/motion, frame
+interpolation, screenshot reference, interop, composition and presentation keep
+running. It is not a shipping optimization and would retain stale UI during
+real interaction. Two live root canvases and 75 traversed transforms were
+recorded in the stable view; this did not establish a large hidden-menu scan.
+Managed capture CPU submission took about 0.003 ms, which does not measure its
+GPU cost. RTSS reported 78.82 source FPS in an uncapped FG interval with
+166.55 submitted / 160.35 displayed FPS: its VULKAN label does not establish
+that it counts generated presents in this configuration.
+
+Optional GPU timestamps measure FSR prepare, optical flow and interpolation.
+Create `profile.request` beside `DVLSFG.FSRFG.dll` before launching; averages
+over 120 frames appear in `native.log`. Remove the marker and restart to turn
+it off. Timestamp reads do not wait for the GPU, and normal runs allocate no
+query pool. These timings exclude Unity rendering, UI capture, compositing,
+image copies and presentation. Observed GPU times were approximately 0.033 ms
+prepare, 0.60–0.84 ms optical flow and 0.49–0.63 ms interpolation; typical
+combined cost was about 1.2–1.4 ms. Native present CPU duration was about
+3.9 ms, including GPU-readiness waits; it overlaps these GPU timings and must
+not be added to them as a separate GPU cost.
+
+This reproduces a substantial source-FPS penalty from the integration, while
+actual displayed throughput improves in this scene. It does not reproduce
+the user's exact 180–200 versus 100–110 scene or prove a fix for all overhead.
+No pacing waits or UI correctness safeguards were removed. Raw evidence and
+fresh user backups are retained locally under ignored `build/fg-throughput`.

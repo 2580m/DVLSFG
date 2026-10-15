@@ -3,7 +3,9 @@
 #include <FidelityFX/host/ffx_frameinterpolation.h>
 #include <FidelityFX/host/ffx_opticalflow.h>
 #include <array>
+#include <algorithm>
 #include <stdexcept>
+#include <filesystem>
 
 namespace {
 PFN_vkEnumerateDeviceExtensionProperties enumerateExtensions{};
@@ -12,7 +14,15 @@ PFN_vkGetPhysicalDeviceProperties properties{};
 PFN_vkGetPhysicalDeviceProperties2 properties2{};
 PFN_vkGetPhysicalDeviceFeatures features{};
 PFN_vkGetPhysicalDeviceFeatures2 features2{};
+PFN_vkGetPhysicalDeviceQueueFamilyProperties queueProperties{};
 PFN_vkGetDeviceProcAddr deviceProc{};
+bool profilingRequested() {
+    wchar_t path[32768]{};
+    auto module=GetModuleHandleW(L"DVLSFG.FSRFG.dll");
+    if(!module || !GetModuleFileNameW(module,path,32768)) return false;
+    std::error_code error;
+    return std::filesystem::exists(std::filesystem::path(path).parent_path()/L"profile.request",error);
+}
 void VKAPI_CALL noBeginLabel(VkCommandBuffer,const VkDebugUtilsLabelEXT*) {}
 void VKAPI_CALL noEndLabel(VkCommandBuffer) {}
 VkResult VKAPI_CALL noObjectName(VkDevice,const VkDebugUtilsObjectNameInfoEXT*) {return VK_SUCCESS;}
@@ -46,6 +56,7 @@ void FsrFrameGeneration::configureInstance(VkInstance instance,PFN_vkGetInstance
     properties2=reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(proc(instance,"vkGetPhysicalDeviceProperties2"));
     features=reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(proc(instance,"vkGetPhysicalDeviceFeatures"));
     features2=reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(proc(instance,"vkGetPhysicalDeviceFeatures2"));
+    queueProperties=reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(proc(instance,"vkGetPhysicalDeviceQueueFamilyProperties"));
 }
 namespace {
 void check(FfxErrorCode result,const char* operation) {
@@ -70,6 +81,12 @@ struct FsrFrameGeneration::State {
     std::array<FfxResourceInternal,5> images{};
     size_t allocated{};
     uint64_t frameId{};
+    VkQueryPool profileQueries{};
+    float timestampPeriod{};
+    uint64_t timestampMask=UINT64_MAX;
+    bool profilePending{};
+    unsigned profileCount{};
+    std::array<double,3> profileSum{};
     void (*logger)(const std::string&){};
     void clear() {
         if(fiCreated) {ffxFrameInterpolationContextDestroy(&fi); fiCreated=false;}
@@ -78,7 +95,29 @@ struct FsrFrameGeneration::State {
         allocated=0;
         if(sharedCreated) {backend.fpDestroyBackendContext(&backend,sharedId); sharedCreated=false;}
     }
-    ~State() {clear();}
+    ~State() {
+        clear();
+        if(profileQueries) reinterpret_cast<PFN_vkDestroyQueryPool>(deviceProc(device.vkDevice,"vkDestroyQueryPool"))(device.vkDevice,profileQueries,nullptr);
+    }
+    void profileBegin(VkCommandBuffer command) {
+        if(!profileQueries) return;
+        if(profilePending) {
+            std::array<uint64_t,4> stamps{};
+            auto result=reinterpret_cast<PFN_vkGetQueryPoolResults>(deviceProc(device.vkDevice,"vkGetQueryPoolResults"))(device.vkDevice,profileQueries,0,4,sizeof(stamps),stamps.data(),sizeof(uint64_t),VK_QUERY_RESULT_64_BIT);
+            if(result==VK_SUCCESS) {
+                for(size_t i=0;i<3;++i) profileSum[i]+=((stamps[i+1]-stamps[i])&timestampMask)*timestampPeriod/1e6;
+                if(++profileCount==120) {
+                    logger("FSR FG GPU ms (120 frames): prepare="+std::to_string(profileSum[0]/profileCount)+" optical="+std::to_string(profileSum[1]/profileCount)+" interpolation="+std::to_string(profileSum[2]/profileCount));
+                    profileSum={}; profileCount=0;
+                }
+            }
+        }
+        reinterpret_cast<PFN_vkCmdResetQueryPool>(deviceProc(device.vkDevice,"vkCmdResetQueryPool"))(command,profileQueries,0,4);
+        profileStamp(command,0); profilePending=true;
+    }
+    void profileStamp(VkCommandBuffer command,uint32_t index) {
+        if(profileQueries) reinterpret_cast<PFN_vkCmdWriteTimestamp>(deviceProc(device.vkDevice,"vkCmdWriteTimestamp"))(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,profileQueries,index);
+    }
     FfxResource get(size_t index) {return backend.fpGetResource(&backend,images.at(index));}
     void create(VkExtent2D size) {
         clear(); render=size; frameId=0;
@@ -106,12 +145,25 @@ FsrFrameGeneration::FsrFrameGeneration(VkDevice device,VkPhysicalDevice physical
     state->device={device,physical,sdkDeviceProc}; state->display=display; state->encoded=encoded; state->logger=logger;
     deviceProc=proc;
     if(!enumerateExtensions || !memoryProperties || !properties || !properties2 || !features || !features2) throw std::runtime_error("FSR downstream instance dispatch unavailable");
+    if(profilingRequested() && queueProperties) {
+        VkPhysicalDeviceProperties info{}; properties(physical,&info);
+        uint32_t count{}; queueProperties(physical,&count,nullptr);
+        std::vector<VkQueueFamilyProperties> queues(count); queueProperties(physical,&count,queues.data());
+        unsigned bits=64;
+        for(auto& queue:queues) if(queue.queueFlags&(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT)) bits=std::min(bits,queue.timestampValidBits);
+        if(info.limits.timestampComputeAndGraphics && bits) {
+            state->timestampMask=bits==64 ? UINT64_MAX : (uint64_t(1)<<bits)-1;
+            VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO}; query.queryType=VK_QUERY_TYPE_TIMESTAMP; query.queryCount=4;
+            if(reinterpret_cast<PFN_vkCreateQueryPool>(proc(device,"vkCreateQueryPool"))(device,&query,nullptr,&state->profileQueries)==VK_SUCCESS) state->timestampPeriod=info.limits.timestampPeriod;
+        }
+    }
 }
 FsrFrameGeneration::~FsrFrameGeneration()=default;
 void FsrFrameGeneration::dispatch(VkCommandBuffer command,VkImage color,VkImage output,const SceneUiFrame& frame,bool reset) {
     auto& s=*state;
     if(!frame.depth.image || !frame.motion.image) throw std::runtime_error("FSR frame generation requires depth and motion vectors");
     if(!s.fiCreated || s.render.width!=frame.renderExtent.width || s.render.height!=frame.renderExtent.height) s.create(frame.renderExtent);
+    s.profileBegin(command);
     reset|=s.frameId==0 || frame.reset;
     const auto input=resource(color,s.display,FFX_SURFACE_FORMAT_R16G16B16A16_FLOAT,FFX_RESOURCE_STATE_COMMON,FFX_RESOURCE_USAGE_READ_ONLY);
     FfxFrameInterpolationPrepareDescription prepare{};
@@ -123,11 +175,13 @@ void FsrFrameGeneration::dispatch(VkCommandBuffer command,VkImage color,VkImage 
     prepare.motionVectors=resource(frame.motion.image,s.render,FFX_SURFACE_FORMAT_R32G32_FLOAT,FFX_RESOURCE_STATE_COMMON,FFX_RESOURCE_USAGE_READ_ONLY);
     prepare.dilatedDepth=s.get(0); prepare.dilatedMotionVectors=s.get(1); prepare.reconstructedPrevDepth=s.get(2); prepare.frameID=++s.frameId;
     check(ffxFrameInterpolationPrepare(&s.fi,&prepare),"Frame generation prepare");
+    s.profileStamp(command,1);
     FfxOpticalflowDispatchDescription optical{}; optical.commandList=prepare.commandList; optical.color=input;
     optical.opticalFlowVector=s.get(3); optical.opticalFlowSCD=s.get(4); optical.reset=reset;
     optical.backbufferTransferFunction=s.encoded ? FFX_BACKBUFFER_TRANSFER_FUNCTION_SRGB : FFX_BACKBUFFER_TRANSFER_FUNCTION_SCRGB;
     optical.minMaxLuminance={0,1};
     check(ffxOpticalflowContextDispatch(&s.of,&optical),"Optical flow dispatch");
+    s.profileStamp(command,2);
     FfxFrameInterpolationDispatchDescription dispatch{};
     dispatch.commandList=prepare.commandList; dispatch.displaySize={s.display.width,s.display.height}; dispatch.renderSize=prepare.renderSize;
     // This input already excludes UI. Registering it in both slots makes the
@@ -144,5 +198,6 @@ void FsrFrameGeneration::dispatch(VkCommandBuffer command,VkImage color,VkImage 
     dispatch.minMaxLuminance[1]=1;
     dispatch.dilatedDepth=prepare.dilatedDepth; dispatch.dilatedMotionVectors=prepare.dilatedMotionVectors; dispatch.reconstructedPrevDepth=prepare.reconstructedPrevDepth;
     check(ffxFrameInterpolationDispatch(&s.fi,&dispatch),"Frame interpolation dispatch");
+    s.profileStamp(command,3);
 }
 }

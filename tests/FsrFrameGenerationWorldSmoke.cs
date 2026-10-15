@@ -65,6 +65,10 @@ namespace DVLSFGTests {
             while(Time.realtimeSinceStartup<deadline && !Find()) yield return new WaitForSecondsRealtime(1);
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
             Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
+            if(File.Exists(Path.Combine(Entry.Path,"throughput-live.txt"))) {
+                yield return ThroughputWorldProbe.Run(Entry);
+                Restore(); yield break;
+            }
             if(File.Exists(Path.Combine(Entry.Path,"zoom-live.txt"))) {
                 yield return ZoomWorldProbe.Run(Entry);
                 Restore(); yield break;
