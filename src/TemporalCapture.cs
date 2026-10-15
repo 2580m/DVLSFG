@@ -23,6 +23,7 @@ namespace DVLSFG {
         float lastFov;
         RenderingPath lastPath;
         int lastFrame=-1;
+        internal bool HistoryReset {get; private set;}
         void Awake() {scene=GetComponent<Camera>(); Cameras.Add(this);}
         void OnPreCull() {
             bool active=Main.NativeLoaded && Main.modEntry.Active && Main.settings.Enabled && Main.settings.FrameGenerationTechnology==2;
@@ -54,7 +55,8 @@ namespace DVLSFG {
             }
             var fsr3=GetComponent<Fsr3SceneCamera>();
             var jitter=fsr3 && fsr3.OwnsSceneTarget ? fsr3.Jitter : Vector2.zero;
-            bool reset=lastFrame!=Time.frameCount-1 || (scene.transform.position-lastPosition).sqrMagnitude>25 || Quaternion.Angle(scene.transform.rotation,lastRotation)>45 || Mathf.Abs(scene.fieldOfView-lastFov)>.1f || lastPath!=scene.actualRenderingPath || Time.unscaledDeltaTime>.25f;
+            bool reset=lastFrame!=Time.frameCount-1 || (scene.transform.position-lastPosition).sqrMagnitude>25 || Quaternion.Angle(scene.transform.rotation,lastRotation)>45 || TemporalHistory.ProjectionDiscontinuity(lastFov,scene.fieldOfView,Time.unscaledDeltaTime) || lastPath!=scene.actualRenderingPath || Time.unscaledDeltaTime>.25f;
+            HistoryReset=reset;
             DVLSFG_SetTemporalMetadata(job,jitter.x,-jitter.y,Time.unscaledDeltaTime*1000,scene.nearClipPlane,scene.farClipPlane,scene.fieldOfView*Mathf.Deg2Rad,reset ? 1 : 0);
             commands.Clear(); commands.Blit(null,depth,material,0); commands.Blit(null,motion,material,1);
             commands.IssuePluginEventAndData(SceneUiRuntime.DVLSFG_GetSceneUiEvent(),4,job); Graphics.ExecuteCommandBuffer(commands);

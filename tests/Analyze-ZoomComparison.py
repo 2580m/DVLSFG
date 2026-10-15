@@ -41,6 +41,7 @@ for trace in sorted(args.run.glob('*-present.csv')):
                   sr_fov_changes=int(samples[-1]['sr_fov_changes']-samples[0]['sr_fov_changes']),
                   fg_fov_changes=int(samples[-1]['fg_fov_changes']-samples[0]['fg_fov_changes']),
                   sr_actual_reset_frames=int(samples[-1]['sr_reset_frames']-samples[0]['sr_reset_frames']),
+                  fg_actual_reset_frames=int(samples[-1]['fg_reset_frames']-samples[0]['fg_reset_frames']) if 'fg_reset_frames' in samples[0] else None,
                   moving_mean_ms=round(float(ms[moving].mean()), 3) if moving.any() else None,
                   settled_mean_ms=round(float(ms[~moving].mean()), 3) if (~moving).any() else None)
     print(json.dumps(result))

@@ -1045,3 +1045,47 @@ other scenes, especially with a different GPU load or camera position.
 logs, comparison images, and original user-data backups are kept locally under
 ignored `build/zoom-regression`. Temporary input/reset patches are removed and
 original save/preferences/configuration are restored after testing.
+
+## Preserve temporal history during smooth zoom (2026-10-15)
+
+Replaced the fixed 0.1-degree FOV reset in FSR SR and FG with a shared optical
+magnification continuity test. It compares the absolute log ratio of
+`tan(previousFov/2)` and `tan(currentFov/2)` against `0.2 + 2*min(dt, 0.1)`.
+The allowance tolerates native smooth zoom at lower frame rates while retaining
+a reset for abrupt projection jumps. Invalid/uninitialized FOVs reset history.
+Existing first-frame/resource, teleport, rotation, render-path and long-frame
+reset conditions are unchanged. The per-frame test allocates no objects.
+
+`TemporalHistoryTests` replays the previously measured native CameraZoom trace
+at 30/60/90/144 FPS. All smooth trajectories had zero projection resets;
+instant 50-to-20 / 20-to-50 degree cuts and invalid inputs retained protection.
+
+The updated game probe records actual explicit FG reset flags as well as SR
+resets. With its reset-suppression option disabled, measured results were:
+
+| Stage | Changing FOV frames | Explicit SR / FG resets | Source FPS | Displayed FPS |
+| --- | ---: | ---: | ---: | ---: |
+| Normal view, SR + FG | 0 | 0 / 0 | 83.04 | 147.02 |
+| Native smooth zoom, 90 FPS target | 158 | 0 / 0 | 79.86 | 143.98 |
+| Native smooth zoom, 30 FPS target | 71 | 0 / 0 | 29.86 | 59.77 |
+| Smooth zoom, FG without SR | 126 | 0 / 0 | 62.66 | 124.52 |
+| Forced abrupt FOV cuts | 5 | 5 / 5 | 81.71 | 144.08 |
+
+Before this change, smooth-zoom samples triggered about 169 explicit resets per
+six seconds. This improvement concerns interpolation continuity, not a promise
+of higher source FPS. Generating real intermediate frames also executes passes
+the SDK skips on reset; performance depends on GPU headroom. Cross-run FPS
+numbers are not a controlled performance improvement comparison.
+
+After performance sampling, three captures were requested specifically while
+FOV was changing, at a 30 FPS source target. Scene-motion registration measured
+median interpolation positions **0.503, 0.495 and 0.496** (previous=0,
+midpoint=0.5, current=1). Generated frames no longer duplicated the current
+source. Comparison sheets showed coherent intermediate zoom positions without
+obvious double edges in the sampled view; these stills do not prove freedom
+from artifacts in all scenes, transparency, or disocclusions.
+
+Evidence, per-frame logs, independent PresentMon traces and original user-data
+backups are kept locally in ignored `build/zoom-history-optimization`. The
+temporary fixture is archived and original user files/configuration restored
+after validation. Only the tested reset policy and FG diagnostic flag ship.

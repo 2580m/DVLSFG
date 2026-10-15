@@ -1,15 +1,17 @@
 param(
     [string[]]$Stages=@('normal','hold','cycle','suppress','no-fg','native','fg-no-sr','repeat-cycle','repeat-suppress','repeat-normal'),
     [string]$Fixture='W:\SteamLibrary\steamapps\common\Derail Valley\Mods\DVLSFG.FsrFgWorldTest',
+    [string]$OutputDirectory,
     [string]$PresentMon='W:\Application\MSI Afterburner\RTSS\RivaTuner Statistics Server\Plugins\Client\PresentMonDataProvider\PresentMon-1.10.0-x64.exe'
 )
 $ErrorActionPreference='Stop'
-$run=Join-Path (Split-Path $PSScriptRoot -Parent) 'build/zoom-regression'
+$run=if($OutputDirectory) {[IO.Path]::GetFullPath($OutputDirectory)} else {Join-Path (Split-Path $PSScriptRoot -Parent) 'build/zoom-regression'}
+New-Item -ItemType Directory $run -Force | Out-Null
 $game=Get-Process DerailValley
 $ready=Join-Path $Fixture 'zoom-ready.txt'
 if(-not (Test-Path $ready) -or (Get-Item $ready).LastWriteTimeUtc -lt $game.StartTime.ToUniversalTime()) {throw 'Zoom fixture is not ready in this game process'}
 foreach($stage in $Stages) {
-    $mode='cycle'; $enabled='True'; $sr=2; $suppress='False'
+    $mode='cycle'; $enabled='True'; $sr=2; $suppress='False'; $limit=0
     switch($stage) {
         'normal' {$mode='steady'}
         'hold' {$mode='hold'}
@@ -21,9 +23,11 @@ foreach($stage in $Stages) {
         'repeat-normal' {$mode='steady'}
         'cycle' {}
         'repeat-cycle' {}
+        'cycle-30' {$limit=30}
+        'cut' {$mode='cut'}
         default {throw "Unknown stage $stage"}
     }
-    $command="$stage;$mode;$enabled;$sr;$suppress"
+    $command="$stage;$mode;$enabled;$sr;$suppress;$limit"
     [IO.File]::WriteAllText((Join-Path $Fixture 'zoom-command.txt'),$command)
     $deadline=[DateTime]::UtcNow.AddSeconds(5)
     do {

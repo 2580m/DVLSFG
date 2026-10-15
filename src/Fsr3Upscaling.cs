@@ -110,7 +110,7 @@ namespace DVLSFG {
         void OnPreCull() {
             if(!OwnsSceneTarget || context==null) return;
             Scene.ResetProjectionMatrix();
-            reset|=(Scene.transform.position-lastPosition).sqrMagnitude>25 || Quaternion.Angle(Scene.transform.rotation,lastRotation)>45 || Mathf.Abs(Scene.fieldOfView-lastFov)>.1f || Time.unscaledDeltaTime>.25f || Scene.actualRenderingPath!=lastRenderingPath;
+            reset|=(Scene.transform.position-lastPosition).sqrMagnitude>25 || Quaternion.Angle(Scene.transform.rotation,lastRotation)>45 || TemporalHistory.ProjectionDiscontinuity(lastFov,Scene.fieldOfView,Time.unscaledDeltaTime) || Time.unscaledDeltaTime>.25f || Scene.actualRenderingPath!=lastRenderingPath;
             lastRenderingPath=Scene.actualRenderingPath;
             lastPosition=Scene.transform.position; lastRotation=Scene.transform.rotation; lastFov=Scene.fieldOfView;
             int phases=Fsr3Upscaler.GetJitterPhaseCount(SceneTarget.width,width);
