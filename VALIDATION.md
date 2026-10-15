@@ -954,3 +954,37 @@ and native HasChanges=false. Native Revert and restoration of the original
 sharpening value also passed. No Computer Use was needed. The temporary fixture
 and logs are archived under ignored `build/settings-apply-regression`; original
 mod configuration and game preferences are restored after the run.
+
+## Autosave thumbnail render-target restoration (2026-10-15)
+
+Reproduced white native autosave thumbnails with FSR FG enabled. The game's
+`SaveGameManager.GetThumbnail` calls `CaptureScreenshot(true)` when there is no
+stashed image; this captures the current render surface. The separate pause-menu
+stash path manually renders the active scene camera and was unaffected.
+
+At the end of the frame, scene/UI separation renders UI over black and white
+backgrounds. Its final `Graphics.Blit` left `RenderTexture.active` bound to
+`DV Scaling UI over white`. That target leaked into the next frame and native
+autosave screenshot capture. The baseline automatic thumbnail had mean pixel
+intensity 255.00 and deviation 0.22, while the stashed thumbnail contained scene
+detail. Disabling frame generation avoided the white capture.
+
+`SceneUiCapture` now restores the render target that was active before its
+end-of-frame work, including bypass and exception paths. This shared capture
+code is used by both frame generation backends.
+
+The world fixture's optional `thumbnail-only.txt` mode invokes the game's real
+automatic and stashed thumbnail paths and writes PNGs plus pixel statistics.
+For FSR FG, all 12 combinations of upscaling off / FSR1 / FSR3, frame generation
+off / on, and automatic / stashed capture passed. Generated counters continued
+advancing in enabled cases. With FSR3 SR and FG on, automatic capture returned
+to the screen surface, with pixel deviation 28.20, and visual inspection showed
+the game scene. Evidence and original user-data backups are archived locally in
+ignored `build/save-thumbnail-regression`.
+
+The same 12-case matrix passed with LSFG 3.1 (24 corrected captures across both
+backends). Its FSR3 SR + FG automatic thumbnail had pixel deviation 28.86 and
+the active target was the screen. An initial LSFG world-load attempt timed out;
+the repeated run from the original backed-up save completed. Tests restore and
+hash-check the original user files and mod configuration, archive added test
+saves, and remove the temporary fixture from the game's Mods directory.

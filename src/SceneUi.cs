@@ -123,6 +123,7 @@ namespace DVLSFG {
             while(true) {
                 yield return end;
                 if(!SceneUiRuntime.Active || failed || job==IntPtr.Zero) continue;
+                var previousActive=RenderTexture.active;
                 try {
                     if(capturedFrame!=Time.frameCount) {Publish(3); continue;}
                     // Capture before temporary Canvas changes and external present hooks.
@@ -133,6 +134,12 @@ namespace DVLSFG {
                     ulong frames;
                     if(SceneUiRuntime.DVLSFG_SceneUiStatus(job,out frames)<0) throw new InvalidOperationException("DXVK scene/UI interop failed; see native status");
                 } catch(Exception e) {failed=true; Clear(); Main.modEntry.Logger.Error("Scene/UI capture: "+e);}
+                finally {
+                    // Camera.Render / Graphics.Blit leave the white UI surface
+                    // bound. Native autosave screenshots would capture that
+                    // surface instead of the game if it leaks into the next frame.
+                    RenderTexture.active=previousActive;
+                }
             }
         }
         void Publish(int kind) {publish.Clear(); publish.IssuePluginEventAndData(callback,kind,job); Graphics.ExecuteCommandBuffer(publish);}

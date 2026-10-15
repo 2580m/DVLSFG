@@ -65,6 +65,10 @@ namespace DVLSFGTests {
             while(Time.realtimeSinceStartup<deadline && !Find()) yield return new WaitForSecondsRealtime(1);
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
             Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
+            if(File.Exists(Path.Combine(Entry.Path,"thumbnail-only.txt"))) {
+                yield return CheckSaveThumbnails();
+                Restore(); yield break;
+            }
             if(File.Exists(Path.Combine(Entry.Path,"comparison.txt"))) {
                 yield return CompareBackends();
                 Restore(); yield break;
@@ -128,6 +132,43 @@ namespace DVLSFGTests {
                 if(fsr.isActiveAndEnabled && camera && camera.enabled && camera.targetTexture && (bool)AccessTools.Property(typeof(Fsr3SceneCamera),"OwnsSceneTarget").GetValue(fsr,null) && (ulong)AccessTools.Field(typeof(Fsr3SceneCamera),"frames").GetValue(fsr)>30) return fsr;
             }
             return null;
+        }
+        IEnumerator CheckSaveThumbnails() {
+            var managerType=AccessTools.TypeByName("SaveGameManager");
+            var manager=UnityEngine.Object.FindObjectOfType(managerType);
+            bool originalEnabled=settings.Enabled;
+            bool passed=true;
+            try {
+                foreach(int upscaler in new[]{0,1,2}) {
+                    settings.FsrTechnology=upscaler; settings.FsrMode=upscaler==0 ? 0 : oldMode>0 ? oldMode : 3;
+                    foreach(bool enabled in new[]{false,true}) {
+                        ulong beforeReal,beforeGenerated; DVLSFG_GetStatus(IntPtr.Zero,0,out beforeReal,out beforeGenerated);
+                        settings.Enabled=enabled; AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+                        yield return new WaitForSecondsRealtime(3);
+                        if(enabled) {
+                            ulong real,generated; DVLSFG_GetStatus(IntPtr.Zero,0,out real,out generated);
+                            if(generated<=beforeGenerated) {passed=false; Log("FAIL frame generation did not advance for upscaler "+upscaler);}
+                        }
+                        foreach(bool stashed in new[]{false,true}) {
+                            AccessTools.Method(managerType,"ClearStashedScreenshot").Invoke(manager,null);
+                            string active=RenderTexture.active ? RenderTexture.active.name : "screen";
+                            if(stashed) AccessTools.Method(managerType,"StashScreenshot").Invoke(manager,null);
+                            var image=(Texture2D)AccessTools.Method(managerType,"GetThumbnail").Invoke(manager,null);
+                            var pixels=image.GetPixels32(); double sum=0,squares=0;
+                            foreach(var pixel in pixels) {double value=(pixel.r+pixel.g+pixel.b)/3.0; sum+=value; squares+=value*value;}
+                            double mean=sum/pixels.Length,variance=squares/pixels.Length-mean*mean;
+                            string name="thumbnail-sr"+upscaler+"-fg"+(enabled ? "on" : "off")+(stashed ? "-stashed" : "-automatic");
+                            File.WriteAllBytes(Path.Combine(Entry.Path,name+".png"),image.EncodeToPNG());
+                            Log(name+" active="+active+" mean="+mean.ToString("F2")+" deviation="+Math.Sqrt(Math.Max(0,variance)).ToString("F2"));
+                            if(variance<4) {passed=false; Log("FAIL blank "+name);}
+                        }
+                    }
+                }
+            } finally {
+                AccessTools.Method(managerType,"ClearStashedScreenshot").Invoke(manager,null);
+                settings.Enabled=originalEnabled; AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+            }
+            File.WriteAllText(Path.Combine(Entry.Path,passed ? "thumbnail-passed.txt" : "thumbnail-failed.txt"),"Automatic and stashed thumbnail pixel checks complete");
         }
         IEnumerator CompareBackends() {
             var preferences=AccessTools.TypeByName("GamePreferences");
