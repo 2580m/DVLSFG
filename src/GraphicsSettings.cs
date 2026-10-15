@@ -108,10 +108,12 @@ namespace DVLSFG {
             switch(field) {
                 case 0:
                     if(!pending.Enabled) return L10n.Get("dv_scaling/frame_generation_description_off");
-                    string generationStatus=failure ?? Main.GraphicsStatus;
+                    // Status belongs to the saved technology, not a selector preview.
+                    bool savedGeneration=pending.Enabled==Main.settings.Enabled && pending.FrameGenerationTechnology==Main.settings.FrameGenerationTechnology;
+                    string generationStatus=failure ?? (savedGeneration ? Main.GraphicsStatus : "");
                     if(generationStatus==L10n.Get("dv_scaling/no_frames_generated_yet")) generationStatus="";
                     return L10n.Get(pending.FrameGenerationTechnology==2 ? "dv_scaling/fsr_fg_description" : "dv_scaling/generate_intermediate_frames_with_lsfg_restart_when_first_en").TrimEnd('\r','\n')
-                        +(generationStatus.Length>0 ? "\n\n"+generationStatus : "")+(Dirty ? L10n.Get("dv_scaling/unapplied_changes") : "");
+                        +(generationStatus.Length>0 ? "\n\n"+generationStatus : "")+(savedGeneration && Dirty ? L10n.Get("dv_scaling/unapplied_changes") : "");
                 case 1:
                     if(pending.FrameGenerationTechnology==2) return L10n.Get("dv_scaling/fsr_fg_fixed_multiplier");
                     return L10n.Get("dv_scaling/target_2_3_or_4_times_the_original_frame_rate_actual_output");
