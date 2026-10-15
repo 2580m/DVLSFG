@@ -19,6 +19,8 @@ namespace DVLSFGTests {
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern int DVLSFG_GetStatus(IntPtr text,uint capacity,out ulong real,out ulong generated);
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_RequestCapture();
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_GetMetrics(out float input,out float submitted,out float mean,out float peak);
+        [DllImport("kernel32.dll")] static extern bool QueryPerformanceCounter(out long value);
+        [DllImport("kernel32.dll")] static extern bool QueryPerformanceFrequency(out long value);
         Transform movingCamera; Quaternion originalRotation; int originalFrameLimit; float motionStarted;
         void LateUpdate() {if(movingCamera) movingCamera.localRotation=originalRotation*Quaternion.Euler(0,Mathf.Sin((Time.realtimeSinceStartup-motionStarted)*.7f)*12,0);}
         ulong lastReal,lastGenerated;
@@ -63,6 +65,10 @@ namespace DVLSFGTests {
             while(Time.realtimeSinceStartup<deadline && !Find()) yield return new WaitForSecondsRealtime(1);
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
             Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
+            if(File.Exists(Path.Combine(Entry.Path,"comparison.txt"))) {
+                yield return CompareBackends();
+                Restore(); yield break;
+            }
             if(File.Exists(Path.Combine(Entry.Path,"benchmark.txt"))) {
                 foreach(bool enabled in new[]{false,true,false,true}) {
                     settings.Enabled=enabled;
@@ -122,6 +128,68 @@ namespace DVLSFGTests {
                 if(fsr.isActiveAndEnabled && camera && camera.enabled && camera.targetTexture && (bool)AccessTools.Property(typeof(Fsr3SceneCamera),"OwnsSceneTarget").GetValue(fsr,null) && (ulong)AccessTools.Field(typeof(Fsr3SceneCamera),"frames").GetValue(fsr)>30) return fsr;
             }
             return null;
+        }
+        IEnumerator CompareBackends() {
+            var preferences=AccessTools.TypeByName("GamePreferences");
+            var key=Enum.Parse(AccessTools.TypeByName("Preferences"),"FrameLimit");
+            var get=AccessTools.GetDeclaredMethods(preferences).Find(m=>m.Name=="Get" && m.IsGenericMethodDefinition).MakeGenericMethod(typeof(int));
+            var set=AccessTools.GetDeclaredMethods(preferences).Find(m=>m.Name=="Set" && m.IsGenericMethodDefinition).MakeGenericMethod(typeof(int));
+            int previous=(int)get.Invoke(null,new[]{key}); bool enabled=settings.Enabled;
+            originalFrameLimit=Application.targetFrameRate;
+            movingCamera=Find().transform; originalRotation=movingCamera.localRotation; motionStarted=Time.realtimeSinceStartup;
+            yield return new WaitForSecondsRealtime(15);
+            var report=Path.Combine(Entry.Path,"comparison.csv");
+            File.WriteAllText(report,"backend,limit,enabled,start_qpc_ms,end_qpc_ms,source_fps,native_real,native_generated,target,vsync\n");
+            bool live=File.Exists(Path.Combine(Entry.Path,"comparison-live.txt"));
+            if(live) {
+                File.WriteAllText(Path.Combine(Entry.Path,"live-ready.txt"),settings.FrameGenerationTechnology.ToString());
+                string last="";
+                while(File.Exists(Path.Combine(Entry.Path,"comparison-live.txt"))) {
+                    string commandFile=Path.Combine(Entry.Path,"live-command.txt");
+                    string command=File.Exists(commandFile) ? File.ReadAllText(commandFile).Trim() : "";
+                    if(command.Length>0 && command!=last) {
+                        var fields=command.Split(';'); int limit=int.Parse(fields[1]);
+                        if(limit!=30 && limit!=60 && limit!=90 && limit!=999) throw new Exception("Invalid comparison limit");
+                        if(fields.Length>3 && fields[3]!="capture") {
+                            int multiplier=int.Parse(fields[3]);
+                            if(multiplier<2 || multiplier>4) throw new Exception("Invalid comparison multiplier");
+                            settings.Multiplier=multiplier;
+                        }
+                        settings.Enabled=bool.Parse(fields[2]); AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+                        set.Invoke(null,new object[]{key,limit});
+                        var limiter=AccessTools.TypeByName("FrameLimiter");
+                        foreach(var obj in Resources.FindObjectsOfTypeAll(limiter)) {var c=obj as Component; if(c && c.gameObject.activeInHierarchy) AccessTools.Method(limiter,"FrameLimitUpdated").Invoke(c,null);}
+                        long qpc,frequency; QueryPerformanceCounter(out qpc); QueryPerformanceFrequency(out frequency);
+                        File.WriteAllText(Path.Combine(Entry.Path,"live-ack.txt"),command+";"+settings.FrameGenerationTechnology+";"+Application.targetFrameRate+";"+QualitySettings.vSyncCount+";"+(qpc/(double)frequency).ToString("F6",System.Globalization.CultureInfo.InvariantCulture)+";"+DateTime.UtcNow.ToString("O"));
+                        last=command;
+                        if(fields.Length>3 && fields[3]=="capture") DVLSFG_RequestCapture();
+                    }
+                    yield return new WaitForSecondsRealtime(.5f);
+                }
+            }
+            foreach(int limit in live ? new int[0] : new[]{30,60,90,999}) {
+                foreach(bool generation in limit==30 || limit==60 ? new[]{false,true} : new[]{true}) {
+                    settings.Enabled=generation;
+                    AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+                    set.Invoke(null,new object[]{key,limit});
+                    var limiter=AccessTools.TypeByName("FrameLimiter");
+                    foreach(var obj in Resources.FindObjectsOfTypeAll(limiter)) {var component=obj as Component; if(component && component.gameObject.activeInHierarchy) AccessTools.Method(limiter,"FrameLimitUpdated").Invoke(component,null);}
+                    yield return new WaitForSecondsRealtime(4);
+                    ulong real0,gen0,real1,gen1; DVLSFG_GetStatus(IntPtr.Zero,0,out real0,out gen0);
+                    int frame=Time.frameCount;
+                    double start=System.Diagnostics.Stopwatch.GetTimestamp()*1000.0/System.Diagnostics.Stopwatch.Frequency;
+                    Log("COMPARISON START backend="+settings.FrameGenerationTechnology+" limit="+limit+" enabled="+generation+" qpc_ms="+start.ToString("F3",System.Globalization.CultureInfo.InvariantCulture));
+                    yield return new WaitForSecondsRealtime(12);
+                    double end=System.Diagnostics.Stopwatch.GetTimestamp()*1000.0/System.Diagnostics.Stopwatch.Frequency;
+                    DVLSFG_GetStatus(IntPtr.Zero,0,out real1,out gen1);
+                    var row=string.Format(System.Globalization.CultureInfo.InvariantCulture,"{0},{1},{2},{3:F3},{4:F3},{5:F3},{6},{7},{8},{9}",settings.FrameGenerationTechnology,limit,generation,start,end,(Time.frameCount-frame)*1000/(end-start),real1-real0,gen1-gen0,Application.targetFrameRate,QualitySettings.vSyncCount);
+                    File.AppendAllText(report,row+"\n"); Log("COMPARISON END "+row);
+                    if(generation && (limit==30 || limit==999)) {DVLSFG_RequestCapture(); yield return new WaitForSecondsRealtime(2);}
+                }
+            }
+            settings.Enabled=enabled; AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+            set.Invoke(null,new object[]{key,previous});
+            File.WriteAllText(Path.Combine(Entry.Path,"comparison-passed.txt"),"Comparison samples collected; inspect independent PresentMon data.");
         }
         void Check(string stage) {
             ulong real,generated; int active=DVLSFG_GetStatus(IntPtr.Zero,0,out real,out generated);

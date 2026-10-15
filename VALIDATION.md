@@ -832,3 +832,59 @@ An initial asynchronous fence race was caught and fixed before the final build.
 Temporary fixtures and added autosaves are archived under the local ignored
 `build/framegen-cadence-validation` directory; original save/preferences files
 are restored and hash-checked after testing.
+
+## LSFG / FSR FG comparison using displayed events (2026-10-15)
+
+The earlier present-request timing checks did not establish display cadence.
+This follow-up uses the already installed PresentMon 1.10 CLI, tracking actual
+display events for the game PID in separate eight-second captures. Each sample
+discards its first and last second. PresentMon 2.3 long recordings lost ETW
+events and were excluded from the final comparison. The API loader's status 14
+means `PM_STATUS_MIDDLEWARE_MISSING_PATH`; it did not prove that the installed
+PresentMon service was unavailable.
+
+Both backends used the same game save, controlled camera pan, Balanced FSR 3.1
+SR, LSFG standard model and 75% LSFG flow quality. The fixture sets the game's
+actual `GamePreferences.Set<int>(Preferences.FrameLimit, ...)` and invokes its
+`FrameLimiter.FrameLimitUpdated` entry, rather than only modifying Unity's
+target directly. Native QPC/UTC acknowledgments record the applied target and
+VSync state. All sampled fixed limits had `vSyncCount=0`; Unlimited applied
+`targetFrameRate=0`.
+
+Measured **displayed FPS**, not generated-frame counters:
+
+| Game source limit | LSFG 2x | FSR FG 2x | LSFG 4x |
+| --- | ---: | ---: | ---: |
+| 30 | 59.77 | 59.87 | 119.54 |
+| 60 | 117.48 | 117.30 | 148.83 |
+| 90 | 141.66 | 142.55 | 146.01 |
+| Unlimited | 154.09 | 154.16 | 142.97 |
+
+At a 60 FPS source limit, LSFG 2x and FSR FG 2x display-gap p10/median/p90 were
+6.042/6.073/12.140 ms and 6.043/6.071/12.139 ms respectively. Thus this sampled
+scene has essentially matching 2x display cadence; this does not prove identical
+motion reconstruction or absence of interpolation artifacts.
+
+The player's saved LSFG configuration before this comparison was 4x; FSR FG is
+fixed at 2x. At a 30 FPS source limit those configurations actually displayed
+approximately 120 versus 60 FPS. They are materially different comparisons.
+
+RTSS's mapped per-application counter continued reporting the source rate. For
+FSR FG it reported 30.04 with 59.87 actually displayed, and 59.06 with 117.30
+actually displayed. It therefore cannot be treated as the final generated
+output counter on this setup, despite labeling the API Vulkan. The game source
+limit does influence the source rate and hence its n-times target; it did not
+limit these final outputs to the same numeric value as the source setting.
+
+Every sampled event used `Composed: Copy with GPU GDI`, with tearing unavailable
+in this windowed display path. Above the 165 Hz display cadence, presents were
+dropped: FSR FG Unlimited requested 222.35 FPS but displayed 154.16, while LSFG
+4x Unlimited requested 359.26 but displayed 142.97. More submitted frames do not
+guarantee more displayed frames or smoother motion in this compositor path.
+
+`Capture-BackendComparison.ps1` and `Analyze-BackendComparison.py` reproduce the
+limit/multiplier and independent display-event checks using the world fixture's
+optional live-comparison mode. Raw traces, RTSS samples and configuration
+backups are archived locally in ignored `build/backend-comparison`. This
+investigation changes test tooling and records; it does not claim a new backend
+fix based on matching display counts.
