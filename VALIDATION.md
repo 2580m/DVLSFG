@@ -1136,3 +1136,65 @@ actual displayed throughput improves in this scene. It does not reproduce
 the user's exact 180–200 versus 100–110 scene or prove a fix for all overhead.
 No pacing waits or UI correctness safeguards were removed. Raw evidence and
 fresh user backups are retained locally under ignored `build/fg-throughput`.
+
+## Reuse unchanged screen UI captures (2026-10-16)
+
+The player's high-throughput view was also measured directly, without
+restarting or intentionally moving the camera: FG off submitted about
+182–184 FPS (RTSS sampled 193); FSR FG submitted 176–178 FPS from 88–89 source
+FPS. Actual displayed rates were about 161–162 versus 159–161 FPS. This
+confirmed a substantial integration penalty beyond the counter-label issue.
+
+Screen UI capture now tracks Graphic dirtiness and compares geometry,
+renderer tint/culling/opacity, Canvas ordering/scaling, material CRCs and
+texture contents/sampling state. Unchanged black/white UI surfaces are reused;
+scene, depth/motion, full-frame overlay reference and frame generation still
+update every source frame. Subscriptions and material/texture state are
+released when captures are cleared. The capture camera uses forward rendering
+without scene occlusion culling and visits active children.
+
+Reuse is limited to built-in Image/RawImage/Text and TMP UI components with
+explicitly recognized UI shaders. RenderTextures, custom/procedural Graphics,
+unknown shaders, scrolling TMP materials and masked/clipped UI retain per-frame
+capture. Removing clipping or activating a Graphic invalidates the cached
+surfaces. Existing MSAA surfaces, scene-only interpolation and presentation
+synchronization are retained.
+
+The opt-in throughput probe can force the previous per-frame UI path with
+`legacy` commands. In a single process at 1080p with FSR 3.1 SR balanced and
+FSR FG 2x, the repeated `final2-comparison` measurements were:
+
+| UI path | Source FPS | Submitted FPS | Displayed FPS | UI CPU ms/source |
+| --- | ---: | ---: | ---: | ---: |
+| Previous capture | 91.60 | 183.09 | 163.96 | 1.980 |
+| Unchanged UI reuse | 132.10 | 264.02 | 164.91 | 0.137 |
+| Previous capture, repeat | 100.77 | 201.36 | 164.71 | 1.969 |
+| Unchanged UI reuse, repeat | 131.56 | 262.99 | 165.06 | 0.136 |
+| Reuse, native 60 FPS source limit | 59.44 | 119.01 | 119.01 | 0.140 |
+
+Source throughput improved about 31–44% in these paired samples and UI CPU
+cost fell about 93%. The source p99 changed from 11.48–13.07 ms to 8.65–8.70 ms.
+The final display remains constrained by the 165 Hz monitor/compositor; the
+263–264 submitted frames are not 263–264 physically displayed frames. These
+are measured scene results, not a guaranteed percentage for every view or UI.
+
+A final shipping-code run (`shipping-comparison`) measured 137.15–141.49
+source FPS and 273.79–280.57 submitted FPS with reuse, versus 95.13 source
+FPS / 190.32 submitted FPS in its stable previous-path sample. UI CPU time
+was 0.130–0.133 ms versus 1.921 ms. Its first previous-path sample overlapped
+loading/UI initialization (changing Canvas counts and large frame spikes)
+and is retained in the raw evidence but excluded from this comparison.
+The 60 FPS source-limit check produced 118.99 submitted/displayed FPS.
+
+`UiCaptureCacheSmoke` covers stable reuse, text edits, geometry/color/tint,
+CanvasGroup opacity, nested Canvas sorting, in-place material changes, texture
+uploads/filtering/addressing, RenderTexture and clipping fallback, activation,
+removal and callback cleanup. A world run also passed twelve automatic/stashed
+thumbnail checks across SR off/FSR1/FSR3 and FG off/on; no blank image was found.
+The shipping build also passed the LSFG 2x/3x/4x scene/UI pixel matrix with
+SR off/FSR1/FSR3: changed opaque/translucent colors, live CanvasGroup fades,
+MSAA edge coverage, capture resize, UMM pause and camera-space UI bypass.
+Presented UI edge differences between real and generated captures were at
+most one 8-bit RGB step; the actual UI textures updated on color/fade changes.
+Raw traces, probe logs, regression images and original user backups are kept
+locally under ignored `build/fg-performance-optimization`.

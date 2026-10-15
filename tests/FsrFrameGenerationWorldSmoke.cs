@@ -31,10 +31,14 @@ namespace DVLSFGTests {
         void Log(string text) {Entry.Logger.Log(text); File.AppendAllText(Path.Combine(Entry.Path,"world-framegen.log"),text+"\n");}
         void Fail(Exception error) {Log("FAIL "+error); Restore(); File.WriteAllText(Path.Combine(Entry.Path,"failed.txt"),error.ToString());}
         IEnumerator Start() {
-            yield return new WaitForSecondsRealtime(15);
+            yield return new WaitForSecondsRealtime(25);
             settings=(Settings)AccessTools.Field(typeof(Main),"settings").GetValue(null);
             Log("Startup enabled="+settings.Enabled+" technology="+settings.FrameGenerationTechnology+" targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
             oldMode=settings.FsrMode; oldTechnology=settings.FsrTechnology; oldWidth=Screen.width; oldHeight=Screen.height; oldScreenMode=Screen.fullScreenMode;
+            if(File.Exists(Path.Combine(Entry.Path,"ui-cache-test.txt"))) {
+                yield return UiCaptureCacheSmoke.Run(Entry);
+                if(!UiCaptureCacheSmoke.Passed) {Restore(); yield break;}
+            }
             MainMenuController activeMenu=null;
             float menuDeadline=Time.realtimeSinceStartup+90;
             while(!activeMenu && Time.realtimeSinceStartup<menuDeadline) {
@@ -65,6 +69,7 @@ namespace DVLSFGTests {
             while(Time.realtimeSinceStartup<deadline && !Find()) yield return new WaitForSecondsRealtime(1);
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
             Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
+            if(File.Exists(Path.Combine(Entry.Path,"thumbnail-first.txt"))) yield return CheckSaveThumbnails();
             if(File.Exists(Path.Combine(Entry.Path,"throughput-live.txt"))) {
                 yield return ThroughputWorldProbe.Run(Entry);
                 Restore(); yield break;

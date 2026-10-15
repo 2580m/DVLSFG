@@ -12,7 +12,7 @@ if(-not (Test-Path $ready) -or (Get-Item $ready).LastWriteTimeUtc -lt $game.Star
 $presentMon='W:/Application/MSI Afterburner/RTSS/RivaTuner Statistics Server/Plugins/Client/PresentMonDataProvider/PresentMon-1.10.0-x64.exe'
 foreach($stage in $Stages) {
     $enabled=if($stage.StartsWith('off')) {'False'} else {'True'}
-    $mode=if($stage.StartsWith('frozen')) {'freeze'} else {'normal'}
+    $mode=if($stage.StartsWith('frozen')) {'freeze'} elseif($stage.StartsWith('legacy')) {'legacy'} else {'normal'}
     $limit=if($stage.EndsWith('-60')) {60} else {999}
     $command="$stage;$enabled;$mode;$limit"
     [IO.File]::WriteAllText((Join-Path $Fixture 'throughput-command.txt'),$command)

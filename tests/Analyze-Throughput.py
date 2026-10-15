@@ -31,6 +31,7 @@ for trace in sorted(a.run.glob('*-present.csv')):
         frame_ms_p50_p95_p99=np.percentile(ms,[50,95,99]).round(3).tolist(),
         mean_ui_cpu_ms=round(np.mean([r['ui_ms'] for r in frames]),3),
         mean_capture_cpu_ms=round(np.mean([r['capture_ms'] for r in frames]),3),
+        ui_redraw_percent=round(100*np.mean([r.get('ui_redrawn',1) for r in frames]),2),
         canvases=sorted(set(r['canvases'] for r in frames)),
         layers=sorted(set(r['layers'] for r in frames)),
         target=sorted(set(r['target'] for r in frames)),

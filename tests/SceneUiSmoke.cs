@@ -66,6 +66,9 @@ namespace DVLSFGTests {
                         if(generated==null) throw new Exception("No generated capture; bridge/presentation inactive");
                         var input=generated.Replace("-generated.bmp","-input.bmp");
                         var capture=UnityEngine.Object.FindObjectOfType<SceneUiCapture>();
+                        var uiTarget=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"black").GetValue(capture);
+                        var uiColor=Pixel(uiTarget,Screen.width/2-200,Screen.height/2);
+                        if(Mathf.Abs(uiColor.r-opaque.color.r)>.02f || Mathf.Abs(uiColor.g-opaque.color.g)>.02f || Mathf.Abs(uiColor.b-opaque.color.b)>.02f) throw new Exception("UI capture retained a stale color: "+uiColor+" expected="+opaque.color);
                         CheckUiAa(capture,technology);
                         foreach(var field in new[]{"scene","black","white"}) {
                             var surface=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),field).GetValue(capture);
@@ -84,6 +87,17 @@ namespace DVLSFGTests {
                 long expected=(long)(afterReal-beforeReal)*(settings.Multiplier-1);
                 if(Math.Abs((long)(afterGenerated-beforeGenerated)-expected)>settings.Multiplier) {Fail(new Exception("Generation counter ratio mismatch")); yield break;}
                 Log("PASS multiplier="+settings.Multiplier+" performance="+settings.Performance+" real="+(afterReal-beforeReal)+" generated="+(afterGenerated-beforeGenerated));
+            }
+            var opacity=opaque.gameObject.AddComponent<CanvasGroup>();
+            foreach(float alpha in new[]{.4f,1f}) {
+                opacity.alpha=alpha; yield return new WaitForSecondsRealtime(.25f);
+                try {
+                    var capture=UnityEngine.Object.FindObjectOfType<SceneUiCapture>();
+                    var target=(RenderTexture)AccessTools.Field(typeof(SceneUiCapture),"black").GetValue(capture);
+                    var actual=Pixel(target,Screen.width/2-200,Screen.height/2);
+                    if(Mathf.Abs(actual.r-alpha)>.02f || Mathf.Abs(actual.b-alpha)>.02f) throw new Exception("Stale CanvasGroup fade: "+actual+" alpha="+alpha);
+                    Log("PASS live CanvasGroup opacity="+alpha+" pixels="+actual);
+                } catch(Exception e) {Fail(e); yield break;}
             }
             Screen.SetResolution(1280,720,FullScreenMode.Windowed);
             yield return new WaitForSecondsRealtime(5);

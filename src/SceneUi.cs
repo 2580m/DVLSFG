@@ -75,6 +75,8 @@ namespace DVLSFG {
         bool failed;
         bool cameraUiWarning;
         internal int CanvasCount;
+        internal bool UiRedrawn;
+        readonly UiCaptureCache uiCache=new UiCaptureCache();
         static readonly FieldInfo Registry=AccessTools.Field(typeof(GraphicRegistry),"m_Graphics");
         readonly List<CanvasState> canvases=new List<CanvasState>();
         readonly List<LayerState> layers=new List<LayerState>();
@@ -113,6 +115,7 @@ namespace DVLSFG {
             var go=new GameObject("DV Scaling UI capture camera"); go.transform.SetParent(transform,false);
             uiCamera=go.AddComponent<Camera>(); uiCamera.enabled=false; uiCamera.orthographic=true; uiCamera.orthographicSize=Screen.height/2f;
             uiCamera.nearClipPlane=.1f; uiCamera.farClipPlane=1000; uiCamera.cullingMask=1<<31; uiCamera.clearFlags=CameraClearFlags.SolidColor; uiCamera.allowHDR=true; uiCamera.allowMSAA=true;
+            uiCamera.useOcclusionCulling=false; uiCamera.renderingPath=RenderingPath.Forward;
             callback=SceneUiRuntime.DVLSFG_GetSceneUiEvent();
             publish=new CommandBuffer {name="DV Scaling publish scene/UI"};
             job=SceneUiRuntime.DVLSFG_CreateSceneUi(scene.GetNativeTexturePtr(),black.GetNativeTexturePtr(),white.GetNativeTexturePtr(),complete.GetNativeTexturePtr());
@@ -144,6 +147,7 @@ namespace DVLSFG {
         }
         void Publish(int kind) {publish.Clear(); publish.IssuePluginEventAndData(callback,kind,job); Graphics.ExecuteCommandBuffer(publish);}
         bool RenderUi() {
+            UiRedrawn=false;
             canvases.Clear(); layers.Clear(); renderers.Clear(); roots.Clear();
             // Enumerate the UI's own live registry; no per-frame global Unity scan.
             var registry=(IDictionary)Registry.GetValue(GraphicRegistry.instance);
@@ -163,9 +167,11 @@ namespace DVLSFG {
             }
             CanvasCount=canvases.Count;
             cameraUiWarning=false;
+            if(!uiCache.NeedsRedraw(registry,roots)) return true;
+            UiRedrawn=true; uiCache.Capturing=true;
             try {
                 foreach(var saved in canvases) {
-                    children.Clear(); saved.Canvas.GetComponentsInChildren<Transform>(true,children);
+                    children.Clear(); saved.Canvas.GetComponentsInChildren<Transform>(false,children);
                     foreach(var child in children) {
                         layers.Add(new LayerState {Object=child.gameObject,Layer=child.gameObject.layer}); child.gameObject.layer=31;
                         var renderer=child.GetComponent<CanvasRenderer>();
@@ -193,10 +199,13 @@ namespace DVLSFG {
                 Canvas.ForceUpdateCanvases();
                 // Temporary camera-space clipping must not leak into the native UI.
                 foreach(var saved in renderers) if(saved.Renderer) saved.Renderer.cull=saved.Culled;
+                uiCache.Capturing=false;
             }
+            uiCache.Captured();
             return true;
         }
         internal void Clear() {
+            uiCache.Clear();
             capturedFrame=-1;
             if(job!=IntPtr.Zero && callback!=IntPtr.Zero) {using(var disposal=new CommandBuffer()) {disposal.IssuePluginEventAndData(callback,2,job); Graphics.ExecuteCommandBuffer(disposal);} job=IntPtr.Zero;}
             if(publish!=null) {publish.Dispose(); publish=null;}
