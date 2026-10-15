@@ -41,12 +41,16 @@ int main(int argc,char** argv) {
         double inputLimit=0;
         bool visible=false;
         bool displayProof=false;
+        bool deferredFence=false;
+        bool presentWait=false;
         for(int arg=1;arg<argc;++arg) {
             std::string value=argv[arg];
             if(value.starts_with("--frames=")) frameCount=std::stoul(value.substr(9));
             if(value.starts_with("--rate=")) inputLimit=std::stod(value.substr(7));
             if(value=="--visible") visible=true;
             if(value=="--display-proof") { displayProof=true; visible=true; }
+            if(value=="--deferred-fence") {deferredFence=true; metadata=true;}
+            if(value=="--present-wait") {presentWait=true; deferredFence=true; metadata=true;}
             if(value=="--resize-present") { resizePresent=true; metadata=true; }
         }
         HINSTANCE module=GetModuleHandleW(nullptr);
@@ -77,8 +81,10 @@ int main(int argc,char** argv) {
         uint32_t family=0; for(;family<count;++family) { VkBool32 supported=0; check(vkGetPhysicalDeviceSurfaceSupportKHR(physical,family,surface,&supported)); if(supported && (families[family].queueFlags&VK_QUEUE_GRAPHICS_BIT)) break; }
         if(family==count) throw std::runtime_error("No graphics/present queue");
         float priority=1.f; VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; queueInfo.queueFamilyIndex=family; queueInfo.queueCount=1; queueInfo.pQueuePriorities=&priority;
-        const char* deviceExt[]={"VK_KHR_swapchain","VK_EXT_swapchain_maintenance1","VK_KHR_present_id"}; VkDeviceCreateInfo devInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO}; devInfo.queueCreateInfoCount=1; devInfo.pQueueCreateInfos=&queueInfo; devInfo.enabledExtensionCount=metadata?3:1; devInfo.ppEnabledExtensionNames=deviceExt;
+        const char* deviceExt[]={"VK_KHR_swapchain","VK_EXT_swapchain_maintenance1","VK_KHR_present_id","VK_KHR_present_wait"}; VkDeviceCreateInfo devInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO}; devInfo.queueCreateInfoCount=1; devInfo.pQueueCreateInfos=&queueInfo; devInfo.enabledExtensionCount=presentWait?4:metadata?3:1; devInfo.ppEnabledExtensionNames=deviceExt;
         VkPhysicalDevicePresentIdFeaturesKHR idFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR}; idFeature.presentId=VK_TRUE;
+        VkPhysicalDevicePresentWaitFeaturesKHR waitFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR}; waitFeature.presentWait=VK_TRUE;
+        if(presentWait) idFeature.pNext=&waitFeature;
         VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenanceFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT}; maintenanceFeature.swapchainMaintenance1=VK_TRUE; maintenanceFeature.pNext=&idFeature;
         if(metadata) devInfo.pNext=&maintenanceFeature;
         VkDevice device; check(vkCreateDevice(physical,&devInfo,nullptr,&device)); VkQueue queue; vkGetDeviceQueue(device,family,0,&queue);
@@ -263,9 +269,23 @@ int main(int argc,char** argv) {
                 std::cout<<"LIVE PASS frame="<<frame<<" multiplier="<<actual<<std::endl;
             }
             if(presentResult!=VK_ERROR_OUT_OF_DATE_KHR) check(presentResult);
-            std::cout<<"Host frame "<<frame<<": presented, result="<<presentResult<<std::endl; check(vkQueueWaitIdle(queue));
+            std::cout<<"Host frame "<<frame<<": presented, result="<<presentResult<<std::endl;
+            if(!deferredFence) check(vkQueueWaitIdle(queue));
             if(metadata) {
+                if(presentWait) {
+                    auto wait=reinterpret_cast<PFN_vkWaitForPresentKHR>(vkGetDeviceProcAddr(device,"vkWaitForPresentKHR"));
+                    auto immediate=wait(device,swapchain,id,0);
+                    if(immediate!=VK_SUCCESS && immediate!=VK_TIMEOUT) check(immediate);
+                    check(wait(device,swapchain,id,5000000000));
+                }
+                if(deferredFence) {
+                    auto state=vkGetFenceStatus(device,presentFence);
+                    if(state!=VK_SUCCESS && state!=VK_NOT_READY) check(state);
+                    auto immediate=vkWaitForFences(device,1,&presentFence,VK_TRUE,0);
+                    if(immediate!=VK_SUCCESS && immediate!=VK_TIMEOUT) check(immediate);
+                }
                 check(vkWaitForFences(device,1,&presentFence,VK_TRUE,5000000000));
+                if(deferredFence) check(vkResetFences(device,1,&presentFence));
                 vkDestroyFence(device,presentFence,nullptr);
                 if(requestedMode!=VK_PRESENT_MODE_FIFO_KHR || presentMode.pNext!=&presentId || presentId.pNext!=&presentFences) throw std::runtime_error("Caller metadata was mutated");
             }

@@ -19,8 +19,8 @@ namespace DVLSFGTests {
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern int DVLSFG_GetStatus(IntPtr text,uint capacity,out ulong real,out ulong generated);
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_RequestCapture();
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_GetMetrics(out float input,out float submitted,out float mean,out float peak);
-        Transform movingCamera; Quaternion originalRotation; int originalFrameLimit;
-        void LateUpdate() {if(movingCamera) movingCamera.localRotation=originalRotation*Quaternion.Euler(0,Mathf.Sin(Time.realtimeSinceStartup*2)*5,0);}
+        Transform movingCamera; Quaternion originalRotation; int originalFrameLimit; float motionStarted;
+        void LateUpdate() {if(movingCamera) movingCamera.localRotation=originalRotation*Quaternion.Euler(0,Mathf.Sin((Time.realtimeSinceStartup-motionStarted)*.7f)*12,0);}
         ulong lastReal,lastGenerated;
         public UnityModManager.ModEntry Entry;
         Settings settings;
@@ -57,14 +57,31 @@ namespace DVLSFGTests {
             try {
                 var popup=AccessTools.TypeByName("DV.UI.LauncherController");
                 foreach(var obj in Resources.FindObjectsOfTypeAll(popup)) {var component=obj as Component; if(component && component.gameObject.activeInHierarchy) {((UnityEngine.UI.Button)AccessTools.Field(popup,"runButton").GetValue(component)).onClick.Invoke(); break;}}
-                settings.FsrMode=2; settings.FsrTechnology=2;
+                settings.FsrMode=oldMode>0 ? oldMode : 3; settings.FsrTechnology=2;
             } catch(Exception error) {Fail(error); yield break;}
             float deadline=Time.realtimeSinceStartup+180;
             while(Time.realtimeSinceStartup<deadline && !Find()) yield return new WaitForSecondsRealtime(1);
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
             Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
+            if(File.Exists(Path.Combine(Entry.Path,"benchmark.txt"))) {
+                foreach(bool enabled in new[]{false,true,false,true}) {
+                    settings.Enabled=enabled;
+                    AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+                    yield return new WaitForSecondsRealtime(3);
+                    var samples=new System.Collections.Generic.List<float>();
+                    float end=Time.realtimeSinceStartup+8;
+                    while(Time.realtimeSinceStartup<end) {yield return null; samples.Add(Time.unscaledDeltaTime);}
+                    double total=0; foreach(var sample in samples) total+=sample;
+                    samples.Sort();
+                    Log("BENCH FG="+enabled+" SR="+settings.FsrMode+" average="+(samples.Count/total).ToString("F2")+" median-ms="+(samples[samples.Count/2]*1000).ToString("F3")+" p99-ms="+(samples[(int)(samples.Count*.99)]*1000).ToString("F3"));
+                }
+            }
             originalFrameLimit=Application.targetFrameRate; Application.targetFrameRate=30;
-            movingCamera=Find().transform; originalRotation=movingCamera.localRotation;
+            movingCamera=Find().transform; originalRotation=movingCamera.localRotation; motionStarted=Time.realtimeSinceStartup;
+            yield return new WaitForSecondsRealtime(3);
+            DVLSFG_RequestCapture();
+            yield return new WaitForSecondsRealtime(3);
+            Application.targetFrameRate=originalFrameLimit;
             yield return new WaitForSecondsRealtime(3);
             DVLSFG_RequestCapture();
             yield return new WaitForSecondsRealtime(3);

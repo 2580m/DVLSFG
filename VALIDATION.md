@@ -777,3 +777,58 @@ A destroyed native settings slider retained in a provider callback could abort
 ApplyChanges. Its callback is now safely skipped; a destroyed-clone regression
 passed. Inactive startup also clears old native counters/logs so evidence from
 a previous enabled run cannot be mistaken for the current process.
+
+## In-game arrows and 2x presentation cadence (2026-10-15)
+
+Reproduced the missing arrows by applying FSR FG in the actual in-world pause
+menu. Its icon meshes extend several units in front of their buttons: the UI
+capture canvas plane at distance 1 clipped them behind the camera's near plane.
+Moving the plane to 100, with a 1000-unit far plane, preserves those meshes.
+Actual in-game graphics and gameplay selectors, including preset arrows, were
+visually checked with FSR FG active. Opening a settings controller synchronizes
+its pending mod settings; Apply ignores inactive, stale menu instances.
+
+The synchronous presentation path delayed the next Unity render while spacing
+the generated and real presents. Its uncapped alternating interval medians were
+3.986 / 6.555 ms despite genuinely intermediate scene motion. For 2x on devices
+with a spare queue in the same graphics family, the real present is now paced on
+that reserved queue while Unity starts rendering the next input. The worker
+retains input imports, semaphores and a deep copy of present metadata. It drains
+before resource reuse, disabling, resize, queue/device idle, and application
+fence/ID waits. Finite and zero timeouts remain supported. The normal 2x path no
+longer performs a device-wide idle wait every frame. Higher LSFG multipliers and
+devices without a spare graphics queue retain the synchronous path.
+
+Final 1920x1080 real-world FSR 3.1 Balanced captures:
+
+- Camera-motion interpolation position medians: 0.502 at a 30 FPS source limit
+  and 0.501 uncapped (previous=0, exact midpoint=0.5, current=1).
+- Uncapped generated-to-real / real-to-generated request interval medians:
+  5.273 / 5.238 ms. Respective p10/p90 intervals: 5.100/5.468 and 4.327/6.313 ms.
+  The first capped capture still contains loading outliers; it is not evidence
+  that loading stutters have been eliminated.
+- 1,444,800 checked scene pixels, zero false overlay-preservation pixels;
+  88,052 generated-versus-current scene differences. 11,059 visible RTSS OSD
+  pixels retained with maximum RGB byte error 0.
+
+`Analyze-FrameInterpolation.py --check` checks scene displacement and alternating
+interval medians, independently of the generation counters. These timings are
+CPU present-request timestamps, not measured physical display intervals.
+PresentMon's existing API could not open a service session (status 14); physical
+display cadence and perceived smoothness are therefore not independently proven.
+
+With the same stationary cab view and Balanced SR, repeated 8-second source
+benchmarks measured FG off/on/off/on at 149.26/101.03/184.98/103.49 FPS. Loading
+and scene warmup materially affect this comparison. A fixed 147 FPS ceiling was
+not reproduced; this does not establish performance parity with an older build.
+Scene/UI capture is also disabled when the selected generation backend differs
+from the backend loaded at startup, avoiding capture work while restart is due.
+
+The real-world fixture passed all five SR qualities, Forward/Deferred rendering,
+resolution change and FSR1/FSR3 transitions. Vulkan synchronization and threading
+validation passed present metadata, immediate fence polling and zero-timeout
+waits, present-ID waits, resize during present, and live 2x/3x/4x transitions.
+An initial asynchronous fence race was caught and fixed before the final build.
+Temporary fixtures and added autosaves are archived under the local ignored
+`build/framegen-cadence-validation` directory; original save/preferences files
+are restored and hash-checked after testing.

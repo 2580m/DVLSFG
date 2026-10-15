@@ -13,8 +13,15 @@
 #include <vector>
 #include <chrono>
 #include <thread>
+#include <deque>
 
 namespace {
+using OutputStamp=std::pair<std::chrono::steady_clock::time_point,bool>;
+thread_local std::deque<OutputStamp> outputHistory;
+void recordOutput(std::chrono::steady_clock::time_point time,bool generated) {
+    outputHistory.emplace_back(time,generated);
+    if(outputHistory.size()>120) outputHistory.pop_front();
+}
 void barrier(VkCommandBuffer buf, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
     unsigned srcFamily, unsigned dstFamily, VkAccessFlags srcAccess, VkAccessFlags dstAccess) {
     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -36,7 +43,7 @@ void waitIdle(VkDevice device) {
     auto fn=reinterpret_cast<PFN_vkDeviceWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkDeviceWaitIdle"));
     VkResult res=fn(device); if(res!=VK_SUCCESS) throw LSFG::vulkan_error(res,"Game device wait failed");
 }
-void completeRejectedPresentFence(VkDevice device,VkQueue queue,const void* metadata) {
+void completeRejectedPresentFence(VkDevice device,VkQueue queue,const void* metadata,bool queueOnly=false) {
     // Some WSI paths reject a second present on an already-outdated chain
     // without completing its fence. DXVK expects normal swapchain errors to
     // complete queue operations. After idle, finish an unsignaled rejected fence.
@@ -54,7 +61,11 @@ void completeRejectedPresentFence(VkDevice device,VkQueue queue,const void* meta
             VkSubmitInfo complete{VK_STRUCTURE_TYPE_SUBMIT_INFO};
             auto result=submit(queue,1,&complete,fence);
             if(result!=VK_SUCCESS) throw LSFG::vulkan_error(result,"Rejected-present fence completion failed");
-            waitIdle(device);
+            if(queueOnly) {
+                auto idle=reinterpret_cast<PFN_vkQueueWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkQueueWaitIdle"));
+                auto idleResult=idle(queue);
+                if(idleResult!=VK_SUCCESS) throw LSFG::vulkan_error(idleResult,"Rejected-present queue wait failed");
+            } else waitIdle(device);
             DVLSFG::status("Completed application fence after rejected resize present");
         }
     }
@@ -65,12 +76,18 @@ void waitUntil(std::chrono::steady_clock::time_point deadline) {
         ~Timer() { if(handle) CloseHandle(handle); }
     };
     thread_local Timer timer;
-    auto remaining=deadline-std::chrono::steady_clock::now();
-    if(remaining<=std::chrono::steady_clock::duration::zero()) return;
-    LARGE_INTEGER due{};
-    due.QuadPart=-std::max<long long>(1,std::chrono::duration_cast<std::chrono::nanoseconds>(remaining).count()/100);
-    if(timer.handle && SetWaitableTimer(timer.handle,&due,0,nullptr,nullptr,FALSE)) WaitForSingleObject(timer.handle,INFINITE);
-    else std::this_thread::sleep_until(deadline);
+    // Windows can resume a waitable-timer thread several hundred microseconds
+    // late. Finish the last fraction actively so the two alternating intervals
+    // do not inherit that systematic scheduling delay.
+    auto wake=deadline-std::chrono::microseconds(800);
+    auto remaining=wake-std::chrono::steady_clock::now();
+    if(remaining>std::chrono::steady_clock::duration::zero()) {
+        LARGE_INTEGER due{};
+        due.QuadPart=-std::max<long long>(1,std::chrono::duration_cast<std::chrono::nanoseconds>(remaining).count()/100);
+        if(timer.handle && SetWaitableTimer(timer.handle,&due,0,nullptr,nullptr,FALSE)) WaitForSingleObject(timer.handle,INFINITE);
+        else std::this_thread::sleep_until(wake);
+    }
+    while(std::chrono::steady_clock::now()<deadline) YieldProcessor();
 }
 }
 LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent2D size,const std::vector<VkImage>& images,VkFormat sourceFormat)
@@ -103,6 +120,7 @@ LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent
 }
 LsContext::~LsContext() noexcept {
     try {
+        finishPending();
         if(!lsfgCtxId && !fsrFrameGeneration) return;
         DVLSFG::status("Destroy context: waiting for game device");
         if(storedDevice) waitIdle(storedDevice);
@@ -112,7 +130,29 @@ LsContext::~LsContext() noexcept {
         DVLSFG::status("Destroy context: backend released");
     } catch(...) {}
 }
+VkResult LsContext::finishPending() {
+    if(!deferredPresent) return VK_SUCCESS;
+    deferredPresent->join();
+    previousOutput=deferredPresent->submitted;
+    recordOutput(previousOutput,false);
+    auto result=deferredPresent->result;
+    deferredPresent.reset();
+    return result;
+}
+bool LsContext::hasPendingFence(VkFence fence) const {
+    if(!deferredPresent) return false;
+    for(auto* node=static_cast<const VkBaseInStructure*>(deferredPresent->metadata.get());node;node=node->pNext) {
+        if(node->sType!=VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT) continue;
+        auto* value=reinterpret_cast<const VkSwapchainPresentFenceInfoEXT*>(node);
+        if(value->pFences[0]==fence) return true;
+    }
+    return false;
+}
+bool LsContext::pendingFinished() const {return !deferredPresent || deferredPresent->finished.load();}
+bool LsContext::hasPendingPresentId(uint64_t id) const {return deferredPresent && deferredPresent->metadata.usesId(id);}
 VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQueue queue,const std::vector<VkSemaphore>& waits,uint32_t index) {
+    auto pendingResult=finishPending();
+    if(pendingResult!=VK_SUCCESS && pendingResult!=VK_SUBOPTIMAL_KHR) return pendingResult;
     auto ui=DVLSFG::acquireSceneUi(info.device,extent);
     const bool fsr=bool(fsrFrameGeneration);
     if((DVLSFG::sceneUiRequested() && (!ui || ui->serial==lastSceneSerial)) || (fsr && (!ui || !ui->depth.image || !ui->motion.image))) {
@@ -130,6 +170,10 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     }
     auto started=std::chrono::steady_clock::now();
     const auto& conf=Config::activeConf;
+    auto deferred=std::make_shared<DVLSFG::DeferredPresent>();
+    // Begin with 2x: only the real frame needs deferred presentation. Higher
+    // LSFG multipliers retain the existing synchronous resource ownership.
+    bool async=info.presentQueue && queue==info.queue.second && conf.multiplier==2 && deferred->metadata.build(pNext);
     const auto family=info.queue.first;
     auto epoch=DVLSFG::epoch();
     bool seedBoth=frameIdx==0 || lastEpoch!=epoch;
@@ -157,10 +201,16 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     // The prior call completes this context before recycling its resources.
     // Current input readiness is carried by the application's wait semaphores.
     if(frameIdx==0) DVLSFG::status("First frame: copying input");
-    DVLSFG::Readback inputCapture,generatedCapture,overlayCapture;
+    DVLSFG::Readback inputCapture,generatedCapture,overlayCapture,previousSceneCapture,currentSceneCapture;
     bool capture=DVLSFG::takeCapture();
+    auto capturedHistory=capture ? outputHistory : std::deque<OutputStamp>{};
+    auto noteOutput=[&](bool generated) {recordOutput(previousOutput,generated);};
     if(capture) {
-        try { inputCapture.create(info.device,info.physicalDevice,extent); generatedCapture.create(info.device,info.physicalDevice,extent); if(ui) overlayCapture.create(info.device,info.physicalDevice,extent); }
+        try {
+            inputCapture.create(info.device,info.physicalDevice,extent); generatedCapture.create(info.device,info.physicalDevice,extent);
+            if(ui) overlayCapture.create(info.device,info.physicalDevice,extent);
+            if(ui && fsr) {previousSceneCapture.create(info.device,info.physicalDevice,extent); currentSceneCapture.create(info.device,info.physicalDevice,extent);}
+        }
         catch(const std::exception& e) { capture=false; DVLSFG::status(std::string("Capture allocation failed: ")+e.what()); }
     }
     auto& pass=passInfos[0];
@@ -211,6 +261,21 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     if(ui) {
         // Use the same antialiased UI for the real frame too; alternating native
         // single-sample UI with resolved UI would make its edges shimmer.
+        if(capture && fsr) {
+            for(unsigned sample=0;sample<2;++sample) {
+                auto source=frames[(frameIdx+1-sample)%2];
+                barrier(before.handle(),source,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+                barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+                blit(before.handle(),source,swapchainImages.at(index),extent);
+                barrier(before.handle(),swapchainImages.at(index),VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+                (sample==0 ? previousSceneCapture : currentSceneCapture).record(before.handle(),swapchainImages.at(index));
+                barrier(before.handle(),source,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL,
+                    VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_SHADER_READ_BIT);
+            }
+        }
         for(auto image:{ui->scene,ui->black,ui->white,ui->complete}) barrier(before.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
         auto real=uiComposite->record(before.handle(),out_n.size(),false,true);
@@ -312,9 +377,10 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         present.waitSemaphoreCount=1; present.pWaitSemaphores=&done;
         present.swapchainCount=1; present.pSwapchains=&swapchain; present.pImageIndices=&target;
-        pace();
-        result=Layer::ovkQueuePresentKHR(queue,&present);
+        if(!async) pace();
         previousOutput=std::chrono::steady_clock::now();
+        result=Layer::ovkQueuePresentKHR(queue,&present);
+        noteOutput(true);
         if(frameIdx==0) DVLSFG::status("First frame: generated image presented");
         if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_ERROR_SURFACE_LOST_KHR) { resizeResult=result; break; }
         if(result!=VK_SUCCESS && result!=VK_SUBOPTIMAL_KHR) throw LSFG::vulkan_error(result,"Generated-frame present failed");
@@ -340,14 +406,48 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     // transition, even when conservative host-side device waits have completed.
     const std::array<VkSemaphore,2> sourceReady{actualReady.handle(),generatedReady.handle()};
     actual.waitSemaphoreCount=2; actual.pWaitSemaphores=sourceReady.data();
-    pace();
-    result=Layer::ovkQueuePresentKHR(queue,&actual);
-    previousOutput=std::chrono::steady_clock::now();
-    bool realPresented=result==VK_SUCCESS || result==VK_SUBOPTIMAL_KHR;
-    if(!realPresented && result!=VK_ERROR_OUT_OF_DATE_KHR && result!=VK_ERROR_SURFACE_LOST_KHR) throw LSFG::vulkan_error(result,"Real-frame present failed");
-    waitIdle(info.device);
-    if(!realPresented) completeRejectedPresentFence(info.device,info.queue.second,pNext);
-    if(realPresented) DVLSFG::countFrame(presentedOutputs);
+    if(async && resizeResult==VK_SUCCESS && presentedOutputs) {
+        // All reads are already submitted on DXVK's graphics queue, before its
+        // next frame can write these textures. Retain imports until the worker's
+        // semaphore waits complete; no device-wide CPU wait is necessary.
+        deferred->ready={actualReady,generatedReady};
+        deferred->inputs=ui;
+        const auto deadline=previousOutput+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(interval));
+        const auto device=info.device; const auto presentQueue=info.presentQueue; const auto chain=swapchain;
+        deferred->worker=std::thread([job=deferred.get(),device,presentQueue,chain,index,deadline,presentedOutputs] {
+            waitUntil(deadline);
+            const std::array<VkSemaphore,2> semaphores{job->ready[0].handle(),job->ready[1].handle()};
+            VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR}; present.pNext=job->metadata.get();
+            present.waitSemaphoreCount=2; present.pWaitSemaphores=semaphores.data();
+            present.swapchainCount=1; present.pSwapchains=&chain; present.pImageIndices=&index;
+            job->submitted=std::chrono::steady_clock::now();
+            job->result=Layer::ovkQueuePresentKHR(presentQueue,&present);
+            // This queue belongs exclusively to this worker. Do not wait the
+            // whole device while DXVK is submitting the next scene in parallel.
+            auto idle=reinterpret_cast<PFN_vkQueueWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkQueueWaitIdle"));
+            auto idleResult=idle(presentQueue);
+            if(job->result==VK_SUCCESS || job->result==VK_SUBOPTIMAL_KHR) {
+                if(idleResult!=VK_SUCCESS) job->result=idleResult;
+                else DVLSFG::countFrame(presentedOutputs);
+            } else if(idleResult==VK_SUCCESS) {
+                try {completeRejectedPresentFence(device,presentQueue,job->metadata.get(),true);}
+                catch(const std::exception& e) {DVLSFG::status(std::string("Deferred resize completion failed: ")+e.what()); job->result=VK_ERROR_DEVICE_LOST;}
+            }
+            job->finished.store(true);
+        });
+        deferredPresent=deferred;
+        if(frameIdx==0) DVLSFG::status("2x presentation pacing on reserved queue (overlaps next game render)");
+    } else {
+        pace();
+        previousOutput=std::chrono::steady_clock::now();
+        result=Layer::ovkQueuePresentKHR(queue,&actual);
+        noteOutput(false);
+        bool realPresented=result==VK_SUCCESS || result==VK_SUBOPTIMAL_KHR;
+        if(!realPresented && result!=VK_ERROR_OUT_OF_DATE_KHR && result!=VK_ERROR_SURFACE_LOST_KHR) throw LSFG::vulkan_error(result,"Real-frame present failed");
+        waitIdle(info.device);
+        if(!realPresented) completeRejectedPresentFence(info.device,info.queue.second,pNext);
+        if(realPresented) DVLSFG::countFrame(presentedOutputs);
+    }
     if(resizeResult!=VK_SUCCESS) { DVLSFG::status("Swapchain resize: drained generation and forwarded application present metadata"); result=resizeResult; }
     ++frameIdx;
     DVLSFG::recordFrameTime(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
@@ -355,11 +455,20 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     if(frameIdx==1) DVLSFG::status("Frame generation active");
     if(capture && copiedOutputs) {
         try {
+            if(deferredPresent) finishPending();
             auto directory=DVLSFG::captureDirectory(); std::filesystem::create_directories(directory);
             auto name="frame-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(frameIdx)+"-"+std::to_string(GetTickCount64());
             inputCapture.save(directory/(name+"-input.bmp"),swapchainFormat);
             generatedCapture.save(directory/(name+"-generated.bmp"),swapchainFormat);
             if(ui) overlayCapture.save(directory/(name+"-overlay-mask.bmp"),swapchainFormat);
+            if(ui && fsr) {
+                previousSceneCapture.save(directory/(name+"-previous-scene.bmp"),swapchainFormat);
+                currentSceneCapture.save(directory/(name+"-current-scene.bmp"),swapchainFormat);
+            }
+            if(!capturedHistory.empty()) {
+                std::ofstream timings(directory/(name+"-outputs.csv")); timings<<"milliseconds,generated\n";
+                for(auto stamp:capturedHistory) timings<<std::chrono::duration<double,std::milli>(stamp.first-capturedHistory.front().first).count()<<','<<stamp.second<<'\n';
+            }
             DVLSFG::status("Framebuffer comparison saved in captures/");
         } catch(const std::exception& e) { DVLSFG::status(std::string("Capture failed: ")+e.what()); }
     }

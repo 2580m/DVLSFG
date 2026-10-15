@@ -23,7 +23,7 @@ namespace DVLSFG {
         internal static bool Active {get {return requested && capture;}}
         internal static void Tick() {
             if(!Main.NativeLoaded) return;
-            bool value=Main.modEntry.Active && Main.settings.Enabled;
+            bool value=Main.modEntry.Active && Main.settings.Enabled && Main.settings.FrameGenerationTechnology==Main.runtimeSettings.FrameGenerationTechnology;
             if(value!=requested) {requested=value; DVLSFG_SetSceneUiEnabled(value ? 1 : 0);}
             foreach(var camera in Cameras) if(camera) camera.enabled=value && !FsrRuntime.Requested;
             foreach(var camera in TemporalSceneCamera.Cameras) if(camera) camera.enabled=value && Main.settings.FrameGenerationTechnology==2 && Main.runtimeSettings.FrameGenerationTechnology==2;
@@ -112,7 +112,7 @@ namespace DVLSFG {
             if(!uiMsaa.Create()) throw new InvalidOperationException("UI MSAA allocation failed");
             var go=new GameObject("DV Scaling UI capture camera"); go.transform.SetParent(transform,false);
             uiCamera=go.AddComponent<Camera>(); uiCamera.enabled=false; uiCamera.orthographic=true; uiCamera.orthographicSize=Screen.height/2f;
-            uiCamera.nearClipPlane=.1f; uiCamera.farClipPlane=100; uiCamera.cullingMask=1<<31; uiCamera.clearFlags=CameraClearFlags.SolidColor; uiCamera.allowHDR=true; uiCamera.allowMSAA=true;
+            uiCamera.nearClipPlane=.1f; uiCamera.farClipPlane=1000; uiCamera.cullingMask=1<<31; uiCamera.clearFlags=CameraClearFlags.SolidColor; uiCamera.allowHDR=true; uiCamera.allowMSAA=true;
             callback=SceneUiRuntime.DVLSFG_GetSceneUiEvent();
             publish=new CommandBuffer {name="DV Scaling publish scene/UI"};
             job=SceneUiRuntime.DVLSFG_CreateSceneUi(scene.GetNativeTexturePtr(),black.GetNativeTexturePtr(),white.GetNativeTexturePtr(),complete.GetNativeTexturePtr());
@@ -164,7 +164,10 @@ namespace DVLSFG {
                         var renderer=child.GetComponent<CanvasRenderer>();
                         if(renderer) renderers.Add(new RendererState {Renderer=renderer,Culled=renderer.cull});
                     }
-                    saved.Canvas.renderMode=RenderMode.ScreenSpaceCamera; saved.Canvas.worldCamera=uiCamera; saved.Canvas.planeDistance=1;
+                    // In-game pause-menu icons sit several units in front of
+                    // their buttons. A plane at 1 clips those icons behind the
+                    // capture camera even though CanvasRenderer.cull is false.
+                    saved.Canvas.renderMode=RenderMode.ScreenSpaceCamera; saved.Canvas.worldCamera=uiCamera; saved.Canvas.planeDistance=100;
                 }
                 Canvas.ForceUpdateCanvases();
                 // Resolve after rasterizing UI geometry with MSAA. The native

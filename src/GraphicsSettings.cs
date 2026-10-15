@@ -24,6 +24,10 @@ namespace DVLSFG {
         float statusTimer;
         ScrollRect graphicsScroll;
         bool graphicsVisible;
+        void OnEnable() {
+            if(pending==null) return;
+            pending=Copy(Main.settings); failure=null; Refresh();
+        }
         readonly Dictionary<Selector,bool> antialiasingControls=new Dictionary<Selector,bool>();
         void UpdateAntialiasingControls() {
             bool disable=Main.modEntry.Active && pending!=null && pending.FsrMode>0 && pending.FsrTechnology==2;
@@ -488,7 +492,7 @@ namespace DVLSFG {
     [HarmonyPatch]
     static class ApplyLSFGGraphicsSettings {
         static MethodBase TargetMethod() { return AccessTools.Method(AccessTools.TypeByName("DV.UI.SettingsProvider"),"ApplyChanges"); }
-        static void Postfix() { foreach(var panel in Resources.FindObjectsOfTypeAll<GraphicsSettingsPanel>()) if(Main.modEntry.Active) panel.Apply(); }
+        static void Postfix() { foreach(var panel in Resources.FindObjectsOfTypeAll<GraphicsSettingsPanel>()) if(Main.modEntry.Active && panel.isActiveAndEnabled) panel.Apply(); }
     }
     [HarmonyPatch(typeof(ASettingsProvider),"RevertChanges")]
     static class DiscardLSFGGraphicsSettings {

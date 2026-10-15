@@ -2,6 +2,7 @@
 #include "platform.hpp"
 #include <array>
 #include <variant>
+#include <vector>
 namespace DVLSFG {
 // Copy only the prefix through the dynamic-mode restriction. The untouched tail
 // remains owned by the application for the duration of vkCreateSwapchainKHR.
@@ -60,6 +61,11 @@ class PresentChain {
     VkPresentModeKHR immediate=VK_PRESENT_MODE_IMMEDIATE_KHR;
     VkBaseOutStructure* head=nullptr;
     VkBaseOutStructure* tail=nullptr;
+    uint64_t id{};
+    VkPresentTimeGOOGLE time{};
+    VkFence fence{};
+    VkPresentRegionKHR region{};
+    std::vector<VkRectLayerKHR> rectangles;
     template<class T> void append(const VkBaseInStructure* node) {
         items[count]=*reinterpret_cast<const T*>(node);
         auto* copy=std::visit([](auto& value) { return reinterpret_cast<VkBaseOutStructure*>(&value); },items[count++]);
@@ -68,6 +74,10 @@ class PresentChain {
         tail=copy;
     }
 public:
+    PresentChain()=default;
+    PresentChain(const PresentChain&)=delete;
+    PresentChain& operator=(const PresentChain&)=delete;
+    bool usesId(uint64_t value) const {return value!=0 && id==value;}
     bool build(const void* chain) {
         unsigned length=0;
         for(auto* node=static_cast<const VkBaseInStructure*>(chain);node;node=node->pNext) {
@@ -75,12 +85,34 @@ public:
             switch(node->sType) {
                 case VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT:
                     append<VkSwapchainPresentModeInfoEXT>(node);
+                    if(std::get<VkSwapchainPresentModeInfoEXT>(items[count-1]).swapchainCount!=1) return false;
                     std::get<VkSwapchainPresentModeInfoEXT>(items[count-1]).pPresentModes=&immediate;
                     break;
-                case VK_STRUCTURE_TYPE_PRESENT_ID_KHR: append<VkPresentIdKHR>(node); break;
-                case VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE: append<VkPresentTimesInfoGOOGLE>(node); break;
-                case VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR: append<VkPresentRegionsKHR>(node); break;
-                case VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT: append<VkSwapchainPresentFenceInfoEXT>(node); break;
+                case VK_STRUCTURE_TYPE_PRESENT_ID_KHR: {
+                    append<VkPresentIdKHR>(node); auto& value=std::get<VkPresentIdKHR>(items[count-1]);
+                    if(value.swapchainCount!=1 || !value.pPresentIds) return false;
+                    id=*value.pPresentIds; value.pPresentIds=&id; break;
+                }
+                case VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE: {
+                    append<VkPresentTimesInfoGOOGLE>(node); auto& value=std::get<VkPresentTimesInfoGOOGLE>(items[count-1]);
+                    if(value.swapchainCount!=1 || !value.pTimes) return false;
+                    time=*value.pTimes; value.pTimes=&time; break;
+                }
+                case VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR: {
+                    append<VkPresentRegionsKHR>(node); auto& value=std::get<VkPresentRegionsKHR>(items[count-1]);
+                    if(value.swapchainCount!=1 || !value.pRegions) return false;
+                    region=*value.pRegions;
+                    if(region.rectangleCount) {
+                        if(!region.pRectangles) return false;
+                        rectangles.assign(region.pRectangles,region.pRectangles+region.rectangleCount);
+                    }
+                    region.pRectangles=rectangles.data(); value.pRegions=&region; break;
+                }
+                case VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT: {
+                    append<VkSwapchainPresentFenceInfoEXT>(node); auto& value=std::get<VkSwapchainPresentFenceInfoEXT>(items[count-1]);
+                    if(value.swapchainCount!=1 || !value.pFences) return false;
+                    fence=*value.pFences; value.pFences=&fence; break;
+                }
                 default:
                     status("Pass-through: unsupported present metadata " + std::to_string(node->sType));
                     return false;

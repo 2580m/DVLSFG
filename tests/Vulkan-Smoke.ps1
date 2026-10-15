@@ -12,6 +12,8 @@ param(
     [switch]$RecoverySettings,
     [switch]$Recreate,
     [switch]$Metadata,
+    [switch]$DeferredFence,
+    [switch]$PresentWait,
     [switch]$Capture,
     [switch]$Secondary,
     [int]$Frames=12,
@@ -58,6 +60,8 @@ if($ApiDump) {
 }
 $hostArgs=if($Toggle){'--toggle'}elseif($Recreate){'--recreate'}elseif($Metadata){'--metadata'}elseif($Capture){'--capture'}elseif($Secondary){'--secondary'}else{'--normal'}
 if($ResizePresent){$hostArgs='--resize-present'}
+if($DeferredFence){$hostArgs+=' --deferred-fence'}
+if($PresentWait){$hostArgs+=' --present-wait'}
 if($Live) { $hostArgs='--live'; if($ResizePresent) { $hostArgs+=' --resize-present' } }
 if($LiveSettings) { $hostArgs='--live-settings'; if($ResizePresent) { $hostArgs+=' --resize-present' } }
 if($RecoverySettings) { $hostArgs='--recovery-settings' }
