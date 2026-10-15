@@ -25,8 +25,12 @@ void main() {
     // from completeGame, unlike the game's own UI, and must never enter optical flow.
     vec3 observed=texelFetch(presented,p,0).rgb;
     if(encoded) observed=decode(observed);
-    vec3 reference=texelFetch(completeGame,uiPixel,0).rgb;
+    // Screenshot capture already has the WSI origin and contains linear values.
+    // It does not need the camera/UI render textures' additional Y flip/decode.
+    vec3 reference=texelFetch(completeGame,p,0).rgb;
     vec3 difference=abs(observed-reference);
-    if(max(max(difference.r,difference.g),difference.b)>.02) color=observed;
+    bool preserve=max(max(difference.r,difference.g),difference.b)>.02;
+    if((mode&8)!=0) {imageStore(outputImage,p,vec4(vec3(preserve ? 1.0 : 0.0),1.0)); return;}
+    if(preserve) color=observed;
     imageStore(outputImage,p,vec4(encoded ? encode(color) : color,1.0));
 }

@@ -157,10 +157,10 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     // The prior call completes this context before recycling its resources.
     // Current input readiness is carried by the application's wait semaphores.
     if(frameIdx==0) DVLSFG::status("First frame: copying input");
-    DVLSFG::Readback inputCapture,generatedCapture;
+    DVLSFG::Readback inputCapture,generatedCapture,overlayCapture;
     bool capture=DVLSFG::takeCapture();
     if(capture) {
-        try { inputCapture.create(info.device,info.physicalDevice,extent); generatedCapture.create(info.device,info.physicalDevice,extent); }
+        try { inputCapture.create(info.device,info.physicalDevice,extent); generatedCapture.create(info.device,info.physicalDevice,extent); if(ui) overlayCapture.create(info.device,info.physicalDevice,extent); }
         catch(const std::exception& e) { capture=false; DVLSFG::status(std::string("Capture allocation failed: ")+e.what()); }
     }
     auto& pass=passInfos[0];
@@ -272,6 +272,25 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         }
         barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,0,VK_ACCESS_TRANSFER_WRITE_BIT);
+        if(capture && ui && i==0) {
+            for(auto image:{ui->black,ui->white,ui->complete}) barrier(copy.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+            auto mask=uiComposite->record(copy.handle(),i,false,false,true);
+            for(auto image:{ui->black,ui->white,ui->complete}) barrier(copy.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
+            blit(copy.handle(),mask,swapchainImages[target],extent);
+            barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+            overlayCapture.record(copy.handle(),swapchainImages[target]);
+            barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_READ_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+            // The diagnostic reused the compositor output; restore the actual image.
+            for(auto image:{ui->black,ui->white,ui->complete}) barrier(copy.handle(),image.image,image.layout,VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_MEMORY_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
+            generated=uiComposite->record(copy.handle(),i);
+            for(auto image:{ui->black,ui->white,ui->complete}) barrier(copy.handle(),image.image,VK_IMAGE_LAYOUT_GENERAL,image.layout,
+                VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT);
+        }
         blit(copy.handle(),generated,swapchainImages[target],extent);
         if(capture && i==0) {
             barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -340,6 +359,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
             auto name="frame-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(frameIdx)+"-"+std::to_string(GetTickCount64());
             inputCapture.save(directory/(name+"-input.bmp"),swapchainFormat);
             generatedCapture.save(directory/(name+"-generated.bmp"),swapchainFormat);
+            if(ui) overlayCapture.save(directory/(name+"-overlay-mask.bmp"),swapchainFormat);
             DVLSFG::status("Framebuffer comparison saved in captures/");
         } catch(const std::exception& e) { DVLSFG::status(std::string("Capture failed: ")+e.what()); }
     }

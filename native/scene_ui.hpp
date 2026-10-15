@@ -26,6 +26,6 @@ public:
     UiComposite(VkDevice device,VkPhysicalDevice physical,VkExtent2D extent,VkFormat swapchainFormat);
     void prepare(const SceneUiFrame& frame,const std::vector<VkImage>& generated);
     VkImage presentedImage() const;
-    VkImage record(VkCommandBuffer command,size_t generatedIndex,bool sceneOnly=false,bool realScene=false);
+    VkImage record(VkCommandBuffer command,size_t generatedIndex,bool sceneOnly=false,bool realScene=false,bool overlayMask=false);
 };
 }

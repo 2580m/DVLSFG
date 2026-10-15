@@ -14,8 +14,13 @@ namespace DVLSFGTests {
             go.AddComponent<FsrFrameGenerationWorldSmokeRunner>().Entry=entry; return true;
         }
     }
+    [DefaultExecutionOrder(2000)]
     public sealed class FsrFrameGenerationWorldSmokeRunner : MonoBehaviour {
         [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern int DVLSFG_GetStatus(IntPtr text,uint capacity,out ulong real,out ulong generated);
+        [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_RequestCapture();
+        [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_GetMetrics(out float input,out float submitted,out float mean,out float peak);
+        Transform movingCamera; Quaternion originalRotation; int originalFrameLimit;
+        void LateUpdate() {if(movingCamera) movingCamera.localRotation=originalRotation*Quaternion.Euler(0,Mathf.Sin(Time.realtimeSinceStartup*2)*5,0);}
         ulong lastReal,lastGenerated;
         public UnityModManager.ModEntry Entry;
         Settings settings;
@@ -26,6 +31,7 @@ namespace DVLSFGTests {
         IEnumerator Start() {
             yield return new WaitForSecondsRealtime(15);
             settings=(Settings)AccessTools.Field(typeof(Main),"settings").GetValue(null);
+            Log("Startup enabled="+settings.Enabled+" technology="+settings.FrameGenerationTechnology+" targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
             oldMode=settings.FsrMode; oldTechnology=settings.FsrTechnology; oldWidth=Screen.width; oldHeight=Screen.height; oldScreenMode=Screen.fullScreenMode;
             MainMenuController activeMenu=null;
             float menuDeadline=Time.realtimeSinceStartup+90;
@@ -34,7 +40,15 @@ namespace DVLSFGTests {
                 if(!activeMenu) yield return new WaitForSecondsRealtime(1);
             }
             if(!activeMenu) {Fail(new Exception("Main menu not loaded")); yield break;}
+            Log("Menu targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount);
             try {
+                var sliderTemplate=Resources.FindObjectsOfTypeAll<SettingChangeSourceSlider>()[0];
+                var staging=new GameObject("Destroyed slider callback validation"); staging.SetActive(false);
+                var stale=Instantiate(sliderTemplate,staging.transform,false);
+                DestroyImmediate(stale.gameObject);
+                AccessTools.Method(typeof(SettingChangeSourceSlider),"OnResetOrApplied").Invoke(stale,null);
+                DestroyImmediate(staging);
+                Log("PASS destroyed settings-slider callback safely ignored");
                 var uiType=typeof(UnityModManager).GetNestedType("UI",System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic);
                 AccessTools.Method(uiType,"ToggleWindow",new[]{typeof(bool)}).Invoke(AccessTools.Field(uiType,"mInstance").GetValue(null),new object[]{false});
                 ((DV.UIFramework.ButtonDV)AccessTools.Field(typeof(MainMenuController),"continueButton").GetValue(activeMenu)).Click();
@@ -48,6 +62,18 @@ namespace DVLSFGTests {
             float deadline=Time.realtimeSinceStartup+180;
             while(Time.realtimeSinceStartup<deadline && !Find()) yield return new WaitForSecondsRealtime(1);
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
+            Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
+            originalFrameLimit=Application.targetFrameRate; Application.targetFrameRate=30;
+            movingCamera=Find().transform; originalRotation=movingCamera.localRotation;
+            yield return new WaitForSecondsRealtime(3);
+            DVLSFG_RequestCapture();
+            yield return new WaitForSecondsRealtime(3);
+            movingCamera.localRotation=originalRotation; movingCamera=null;
+            Application.targetFrameRate=originalFrameLimit;
+            Log("World motion and overlay mask captured at 30 FPS source");
+            if(File.Exists(Path.Combine(Entry.Path,"capture-only.txt"))) {
+                Restore(); File.WriteAllText(Path.Combine(Entry.Path,"capture-passed.txt"),"Real world motion capture complete"); yield break;
+            }
             for(int quality=1;quality<=5;quality++) {
                 settings.FsrMode=quality;
                 yield return new WaitForSecondsRealtime(4);
@@ -84,6 +110,8 @@ namespace DVLSFGTests {
             ulong real,generated; int active=DVLSFG_GetStatus(IntPtr.Zero,0,out real,out generated);
             if(active!=1 || generated<=lastGenerated || real<=lastReal || Math.Abs((long)(real-lastReal)-(long)(generated-lastGenerated))>2) throw new Exception("FSR FG inactive or not 2x: "+stage+" real="+real+" generated="+generated);
             lastReal=real; lastGenerated=generated;
+            float inputRate,submittedRate,mean,peak; DVLSFG_GetMetrics(out inputRate,out submittedRate,out mean,out peak);
+            Log("Rates "+stage+": input="+inputRate+" submitted="+submittedRate+" target="+Application.targetFrameRate+" vsync="+QualitySettings.vSyncCount);
             var fsr=Find(); if(!fsr) throw new Exception("No FSR3 world output: "+stage);
             var camera=fsr.GetComponent<Camera>();
             if(!camera || !camera.targetTexture) throw new Exception("World scene target missing: "+stage);
@@ -122,6 +150,6 @@ namespace DVLSFGTests {
             }
             Log("PASS "+stage+" camera="+camera.name+" target="+camera.targetTexture.width+"x"+camera.targetTexture.height+" output="+output.width+"x"+output.height+" rendering="+camera.actualRenderingPath+" post-AA="+(post==null ? "no PPV2 layer" : "None")+" scene MSAA disabled, UI/global MSAA="+QualitySettings.antiAliasing+", depth/motion enabled, finite pixels and picking rays");
         }
-        void Restore() {if(settings!=null) {settings.FsrMode=oldMode; settings.FsrTechnology=oldTechnology;} Screen.SetResolution(oldWidth,oldHeight,oldScreenMode);}
+        void Restore() {if(movingCamera) {movingCamera.localRotation=originalRotation; movingCamera=null; Application.targetFrameRate=originalFrameLimit;} if(settings!=null) {settings.FsrMode=oldMode; settings.FsrTechnology=oldTechnology;} Screen.SetResolution(oldWidth,oldHeight,oldScreenMode);}
     }
 }

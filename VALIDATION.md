@@ -744,3 +744,36 @@ selectors as overlay UI over a synthetic FSR scene, checks generation advances,
 and checks six native arrow icons (114–126 bright pixels each in the tested capture). Test screenshots and logs are
 archived locally under `build/overlay-arrow-validation`; temporary fixture mods
 are removed after testing. User configuration and game preferences are restored.
+
+## Real-world interpolation regression (2026-10-15)
+
+The previous external-OSD fix incorrectly flipped the complete screenshot like
+the camera/UI render textures. Those captures have different origins. A real
+world camera pan exposed 563,275 scene pixels (19.890% of the checked region)
+being misclassified as external overlays and copied back from the real frame.
+The synthetic scene had not exposed this failure across its flat background.
+
+The screenshot is now sampled in WSI coordinates without a second Y flip or
+color decode. A same-snapshot four-way origin/color diagnostic identified this
+interpretation with zero scene false positives. The final real-world capture
+at 30 FPS source passed both independent checks:
+
+- 2,832,000 checked scene pixels; zero wrongly preserved pixels; 480,462 final
+  generated-versus-real scene differences above the RGB threshold.
+- 10,256 visible OSD pixels in the 600x90 test region; maximum RGB byte error 0.
+
+Capture requests now also save an overlay preservation mask for regression
+checks. The world fixture backs up user state and briefly rotates the camera;
+its quality-mode, rendering-path and resize runs also reported submitted rates
+above 200 FPS (including 209.209 and 218.722), with no 165 FPS output ceiling.
+
+The game's MainMenu.Start separately replaces non-VSync preferences, including
+Unlimited (999), with the monitor refresh rate. The mod reapplies the selected
+preference, including when the gameplay FrameLimiter has not been instantiated.
+Menu and world logs both confirmed targetFrameRate=0 and vSyncCount=0 for
+Unlimited on the 165 Hz monitor.
+
+A destroyed native settings slider retained in a provider callback could abort
+ApplyChanges. Its callback is now safely skipped; a destroyed-clone regression
+passed. Inactive startup also clears old native counters/logs so evidence from
+a previous enabled run cannot be mistaken for the current process.

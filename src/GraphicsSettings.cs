@@ -442,10 +442,39 @@ namespace DVLSFG {
     static class DeferUninitializedSettingsSlider {
         static readonly FieldInfo Slider=AccessTools.Field(typeof(SettingChangeSourceSlider),"slider");
         static bool Prefix(SettingChangeSourceSlider __instance) {
+            // Providers can retain delegates from a settings menu already destroyed
+            // during a scene switch. Unity's managed wrapper then compares to null.
+            if(!__instance) return false;
             // The provider notifies hidden categories too. Their slider cache is
             // populated by Awake only when they first become active; OnEnable
             // will apply the latest provider value then.
             return __instance.gameObject.activeInHierarchy || Slider.GetValue(__instance)!=null;
+        }
+    }
+    [HarmonyPatch]
+    static class PreserveConfiguredMenuFrameLimit {
+        static MethodBase TargetMethod() {return AccessTools.Method(AccessTools.TypeByName("DV.UI.MainMenu"),"Start");}
+        static void Postfix() {
+            if(Main.modEntry==null || !Main.modEntry.Active) return;
+            // MainMenu.Start replaces every non-VSync setting (including 999 /
+            // Unlimited) with the monitor refresh rate. Reapply the game's own
+            // limiter so the selected preference remains authoritative.
+            var type=AccessTools.TypeByName("FrameLimiter");
+            var update=AccessTools.Method(type,"FrameLimitUpdated");
+            bool applied=false;
+            foreach(var obj in Resources.FindObjectsOfTypeAll(type)) {
+                var limiter=obj as Component;
+                if(limiter && limiter.gameObject.activeInHierarchy) {update.Invoke(limiter,null); applied=true;}
+            }
+            if(!applied) {
+                // The gameplay limiter may not exist in the launcher scene yet.
+                var preferences=AccessTools.TypeByName("GamePreferences");
+                var key=Enum.Parse(AccessTools.TypeByName("Preferences"),"FrameLimit");
+                var get=AccessTools.GetDeclaredMethods(preferences).Find(method=>method.Name=="Get" && method.IsGenericMethodDefinition && method.GetParameters().Length==1);
+                int limit=(int)get.MakeGenericMethod(typeof(int)).Invoke(null,new[]{key});
+                Application.targetFrameRate=limit==999 ? 0 : limit;
+                QualitySettings.vSyncCount=limit==0 ? 1 : 0;
+            }
         }
     }
     [HarmonyPatch(typeof(SettingsController),"get_HasChanges")]

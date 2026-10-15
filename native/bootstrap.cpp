@@ -61,7 +61,16 @@ void initialize() {
             addEnvironment(L"VK_ADD_LAYER_PATH",mod.wstring());
             addEnvironment(L"VK_INSTANCE_LAYERS",L"VK_LAYER_DVLSFG_frame_generation",true);
             output<<"Automatic LSFG startup enabled before Vulkan initialization\n";
-        } else output<<"Automatic LSFG startup inactive; forwarding to system Vulkan\n";
+        } else {
+            output<<"Automatic frame generation startup inactive; forwarding to system Vulkan\n"
+                  <<"Frame generation enabled in startup config: "<<requested<<"\n";
+            if(game && installed) {
+                // Never leave counters/logs from an earlier enabled run looking
+                // like evidence that this process loaded the frame generator.
+                std::ofstream(mod/L"native.log",std::ios::trunc)<<"DVLSFG: backend not loaded for process "<<GetCurrentProcessId()<<"; see bootstrap.log\n";
+                std::ofstream(mod/L"metrics.ini",std::ios::trunc)<<"BackendLoaded=0\nInputFPS=0\nSubmittedFPS=0\nRealFrames=0\nGeneratedFrames=0\n";
+            }
+        }
     } catch(...) { /* Configuration failure must leave ordinary Vulkan usable. */ }
     wchar_t system[32768]{}; if(!GetSystemDirectoryW(system,32768)) RaiseFailFastException(nullptr,nullptr,0);
     auto path=std::filesystem::path(system)/L"vulkan-1.dll";
