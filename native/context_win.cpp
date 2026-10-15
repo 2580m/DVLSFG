@@ -43,6 +43,24 @@ void waitIdle(VkDevice device) {
     auto fn=reinterpret_cast<PFN_vkDeviceWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkDeviceWaitIdle"));
     VkResult res=fn(device); if(res!=VK_SUCCESS) throw LSFG::vulkan_error(res,"Game device wait failed");
 }
+void waitGeneratedImage(VkDevice device,VkQueue queue) {
+    // Start the display interval only once interpolation/copy work is ready.
+    // Otherwise GPU work eats the interval and the compositor may receive the
+    // generated and real images together, discarding the generated image.
+    auto create=reinterpret_cast<PFN_vkCreateFence>(Layer::ovkGetDeviceProcAddr(device,"vkCreateFence"));
+    auto destroy=reinterpret_cast<PFN_vkDestroyFence>(Layer::ovkGetDeviceProcAddr(device,"vkDestroyFence"));
+    auto submit=reinterpret_cast<PFN_vkQueueSubmit>(Layer::ovkGetDeviceProcAddr(device,"vkQueueSubmit"));
+    auto wait=reinterpret_cast<PFN_vkWaitForFences>(Layer::ovkGetDeviceProcAddr(device,"vkWaitForFences"));
+    VkFenceCreateInfo desc{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence{};
+    auto result=create(device,&desc,nullptr,&fence);
+    if(result!=VK_SUCCESS) throw LSFG::vulkan_error(result,"Generated-image fence creation failed");
+    VkSubmitInfo marker{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    result=submit(queue,1,&marker,fence);
+    if(result==VK_SUCCESS) result=wait(device,1,&fence,VK_TRUE,UINT64_MAX);
+    destroy(device,fence,nullptr);
+    if(result!=VK_SUCCESS) throw LSFG::vulkan_error(result,"Generated-image readiness wait failed");
+}
 void completeRejectedPresentFence(VkDevice device,VkQueue queue,const void* metadata,bool queueOnly=false) {
     // Some WSI paths reject a second present on an already-outdated chain
     // without completing its fence. DXVK expects normal swapchain errors to
@@ -372,6 +390,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         copy.end();
         std::vector<VkSemaphore> signals{pass.postCopySemaphores[i].handle()};
         copy.submit(info.queue.second,{pass.acquireSemaphores[i].handle(),pass.renderSemaphores[i].handle()},signals);
+        if(async) waitGeneratedImage(info.device,info.queue.second);
         ++copiedOutputs;
         const auto done=pass.postCopySemaphores[i].handle();
         VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};

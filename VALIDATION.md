@@ -888,3 +888,45 @@ optional live-comparison mode. Raw traces, RTSS samples and configuration
 backups are archived locally in ignored `build/backend-comparison`. This
 investigation changes test tooling and records; it does not claim a new backend
 fix based on matching display counts.
+
+## GPU-ready presentation pacing (2026-10-15)
+
+Repeated the actual Display settings slider / Apply Changes path, without the
+comparison fixture, at the player's 2560x1440 resolution with FSR 3.1 Balanced
+SR and FSR FG 2x. Restarted after selecting the FG backend, then selected and
+applied the native 60 FPS limit and closed the settings menu. PresentMon 1.10
+eight-second captures discard their first and last second.
+
+| FSR FG configuration | Requests/s | Displayed/s | Dropped |
+| --- | ---: | ---: | ---: |
+| Before, native limit 60 | 117.88 | 101.30 | 14.06% |
+| GPU-ready pacing, native limit 60 | 118.96 | 118.96 | 0% |
+| GPU-ready pacing, native Unlimited | 187.54 | 164.72 | 12.16% |
+
+The original generated-frame present was queued while interpolation still had
+about 4.5 ms of GPU work pending. The real-frame worker counted its half-frame
+interval from that CPU submission, allowing the two ready images to bunch up
+and the window compositor to discard generated frames. The asynchronous 2x
+path now waits for the generated image's queue work with a fence before
+starting its presentation interval. This waits for that queue's submitted work,
+not a device-wide idle, and preserves the next game render / real-present overlap.
+Both 2x backends share this readiness rule; higher multipliers are unchanged.
+
+Unlimited displayed gap p10/median/p90 was 6.043/6.061/6.078 ms on the 165 Hz
+display. Present mode remained `Composed: Copy with GPU GDI`, with no tearing;
+requests beyond the physical refresh cadence can still be dropped. RTSS still
+reported the source rate (about 59 FPS at the 60 FPS game limit).
+
+The exact reported hard ceiling of 60 final FPS was not reproduced in this run;
+the measured and corrected defect was loss of generated frames before display.
+These static-view event counts do not establish motion-reconstruction quality
+or resolve every reported subjective smoothness difference. Also, changing FG
+technology requires restarting: applying a different backend disables the old
+one until the selected backend loads on restart.
+
+Vulkan 1.4.363 synchronization/thread validation passed 36 real + 36 generated
+frames with combined present metadata, deferred application fence waits and
+present-ID waits. The older 1.4.309 validator reported WRITE_AFTER_PRESENT;
+the repeated run with 1.4.363 reported zero messages. Present metadata unit
+checks also passed. Traces and fresh user-data backups are kept locally in
+ignored `build/ui-framelimit-regression`.
