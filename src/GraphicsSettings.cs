@@ -444,6 +444,22 @@ namespace DVLSFG {
     static class InstallGraphicsSettings {
         static void Postfix(SettingsController __instance) { if(!__instance.GetComponent<GraphicsSettingsPanel>()) __instance.gameObject.AddComponent<GraphicsSettingsPanel>(); }
     }
+    [HarmonyPatch]
+    static class IgnoreDestroyedSettingsCallbacks {
+        static IEnumerable<MethodBase> TargetMethods() {
+            foreach(var type in typeof(SettingChangeSource).Assembly.GetTypes()) {
+                if(type.ContainsGenericParameters || !typeof(SettingChangeSource).IsAssignableFrom(type)) continue;
+                var callback=AccessTools.DeclaredMethod(type,"OnResetOrApplied",Type.EmptyTypes);
+                if(callback!=null && !callback.IsAbstract) yield return callback;
+            }
+        }
+        static bool Prefix(SettingChangeSource __instance) {
+            // Native providers can outlive a settings screen and retain its
+            // checkbox/selector callbacks too. Skip only destroyed Unity objects;
+            // live controls must still receive Apply and Revert notifications.
+            return __instance!=null;
+        }
+    }
     [HarmonyPatch(typeof(SettingChangeSourceSlider),"OnResetOrApplied")]
     static class DeferUninitializedSettingsSlider {
         static readonly FieldInfo Slider=AccessTools.Field(typeof(SettingChangeSourceSlider),"slider");

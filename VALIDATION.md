@@ -930,3 +930,27 @@ present-ID waits. The older 1.4.309 validator reported WRITE_AFTER_PRESENT;
 the repeated run with 1.4.363 reported zero messages. Present metadata unit
 checks also passed. Traces and fresh user-data backups are kept locally in
 ignored `build/ui-framelimit-regression`.
+
+## Settings Apply / Revert destroyed callbacks (2026-10-15)
+
+The player's log showed repeated `NullReferenceException` failures in
+`SettingChangeSourceCheckbox.OnResetOrApplied`, reached from
+`ASettingsProvider.ApplyChanges`. The provider retained a callback to a destroyed
+Unity component. That exception interrupted the notification chain and the mod's
+Apply postfix, leaving pending settings and the unsaved-changes prompt stuck.
+The existing destroyed-slider protection did not cover checkboxes or selectors.
+
+Apply/Revert notification methods on concrete native `SettingChangeSource`
+types now skip destroyed component instances. Live controls still run their
+normal callbacks; the slider's separate uninitialized-cache protection remains.
+Open generic types are excluded from Harmony targets.
+
+`Install-GameFixture.ps1 -Kind SettingsApply` installs the focused in-game
+regression. It activates clones of native checkbox, selector and slider
+bindings so they subscribe to the real provider, destroys them, and invokes
+their stale callbacks. It then changes mod sharpening through the real settings
+panel, invokes the native Apply button, and verifies persistence, mod Dirty=false
+and native HasChanges=false. Native Revert and restoration of the original
+sharpening value also passed. No Computer Use was needed. The temporary fixture
+and logs are archived under ignored `build/settings-apply-regression`; original
+mod configuration and game preferences are restored after the run.
