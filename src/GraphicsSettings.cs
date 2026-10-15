@@ -400,7 +400,7 @@ namespace DVLSFG {
             TextChanged_Fire();
         }
     }
-    // Fit multiline help inside the existing footer; native items retain their own typography.
+    // Keep custom descriptions at the native font size, including blank status lines.
     public sealed class GraphicsDescriptionLayout : MonoBehaviour {
         TMPro.TMP_Text text;
         Vector4 margin;
@@ -414,10 +414,10 @@ namespace DVLSFG {
             if(custom==help) return;
             custom=help;
             text.margin=help ? new Vector4(margin.x,Mathf.Min(margin.y,9),margin.z,Mathf.Min(margin.w,9)) : margin;
-            text.fontSizeMin=help ? fontSize*.8f : minSize;
-            text.fontSizeMax=help ? fontSize : maxSize;
-            text.enableAutoSizing=help || autoSize;
-            if(!help) text.fontSize=fontSize;
+            text.fontSizeMin=minSize;
+            text.fontSizeMax=maxSize;
+            text.enableAutoSizing=help ? false : autoSize;
+            text.fontSize=fontSize;
         }
     }
     [HarmonyPatch(typeof(TooltipHandler),"UpdateTooltipText")]
