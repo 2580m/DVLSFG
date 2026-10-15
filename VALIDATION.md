@@ -988,3 +988,60 @@ the active target was the screen. An initial LSFG world-load attempt timed out;
 the repeated run from the original backed-up save completed. Tests restore and
 hash-check the original user files and mod configuration, archive added test
 saves, and remove the temporary fixture from the game's Mods directory.
+
+## Native right-button zoom measurements (2026-10-15)
+
+Measured the existing FSR FG 3.1 + FSR 3.1 Balanced configuration at 1920x1080,
+with the game's selected 90 FPS source limit and a 165 Hz display. The optional
+`zoom-live.txt` world-fixture mode uses a temporary Harmony substitution limited
+to the current Rewired player's Zoom action. The game's native `CameraZoom`
+still executes its normal press/release and SmoothDamp code. Repeated zoom
+cycles hold/release every 1.2 seconds; native FOV ranges from 50 to 20 degrees.
+No production camera or reset code was changed.
+
+Each stage warms up for three seconds, then records eight seconds with the
+independent PresentMon 1.10 CLI. Analysis trims the first and last second and
+correlates the display events with per-frame QPC, Unity frame time, FOV, and
+history-reset counters from the fixture. PNG/BMP readbacks occur only after
+performance sampling, since capture itself stalls rendering.
+
+| Configuration | Source FPS | Source p99 ms | Displayed FPS | SR reset frames / sampled 6 s |
+| --- | ---: | ---: | ---: | ---: |
+| FG + SR, normal view | 87.80 | 12.850 | 161.30 | 0 |
+| FG + SR, held zoom | 88.37 | 13.064 | 159.28 | 0 |
+| FG + SR, cycling zoom | 87.15 | 12.949 | 159.19 | 169 |
+| Same cycles, suppress FOV reset in test only | 86.96 | 13.441 | 160.36 | 0 |
+| SR, FG off, cycling zoom | 88.84 | 12.089 | 88.91 | 173 |
+| SR and FG off, cycling zoom | 88.72 | 12.111 | 88.74 | 0 |
+| FG, SR off, cycling zoom | 87.03 | 13.470 | 157.26 | 0 (FG FOV changes: 168) |
+| Repeat FG + SR cycles | 84.37 | 14.216 | 158.91 | 166 |
+| Repeat cycles, suppress FOV reset | 87.79 | 12.981 | 161.10 | 0 |
+| Repeat normal view | 88.06 | 12.891 | 161.78 | 0 |
+
+No sampled source frame exceeded 20 ms; the largest was 17.244 ms. Thus this
+scene shows a small source-rate variation, not a reproduced large rendering
+stall. Suppressing resets did not consistently improve source FPS across both
+runs, so reset-related GPU cost is not established as a major FPS-drop cause.
+
+There is, however, a confirmed interpolation discontinuity. Both managed FSR
+paths reset history when adjacent FOV values differ by more than 0.1 degrees.
+AMD's frame-interpolation setup resets the frame-index counter, and its shader
+explicitly copies `LoadCurrentBackbuffer` rather than interpolating when that
+counter is zero (`ffx_frameinterpolation_setup.h` and
+`ffx_frameinterpolation.h`). During the zoom transitions, generated presents
+therefore need not contain new intermediate scene positions.
+
+A captured original-reset zoom frame confirms this: previous/current scene
+RGB mean absolute difference was 4.2179, but generated/current-real difference
+was only 0.0044 (central 70% crop, 8-bit RGB; ratio 0.001). The test-only reset
+suppression produced different intermediate images; a moving sample had scene
+difference 8.2061 and generated/current difference 6.1391. This establishes
+non-duplication for that sample, not image-quality correctness or suitability
+of permanently removing FOV resets. More than one cause can contribute in
+other scenes, especially with a different GPU load or camera position.
+
+`ZoomWorldProbe.cs`, `Capture-ZoomComparison.ps1`, and
+`Analyze-ZoomComparison.py` reproduce these measurements. Raw traces, per-frame
+logs, comparison images, and original user-data backups are kept locally under
+ignored `build/zoom-regression`. Temporary input/reset patches are removed and
+original save/preferences/configuration are restored after testing.
