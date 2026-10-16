@@ -1,4 +1,4 @@
-# DV Scaling 0.6.2（实验版）
+# DV Scaling 0.6.3（实验版）
 
 
 ## 0.6.0：AMD FSR FG 3.1 帧生成
@@ -88,7 +88,7 @@ DVLSFG 不修改或包含 DVVulkan，也不修改系统 Vulkan 注册表。
 
 ## 安装和启动
 
-1. 退出游戏，把 dv-scaling-0.6.2.zip 拖入 UMM 安装。
+1. 退出游戏，把 dv-scaling-0.6.3.zip 拖入 UMM 安装。
 2. 确保 DVVulkan 已启用且完成退出后的 DXVK 部署。
 3. 普通启动游戏，在 UMM 启用 DVLSFG，填写自己安装的 `Lossless.dll` 完整路径并保存。
    打开游戏“设置 → 图形质量”，在“帧生成”中选择 LSFG 3.1，点击原生“应用”。

@@ -2,7 +2,7 @@
   "Id": "DVLSFG",
   "DisplayName": "DV Scaling (Beta)",
   "Author": "BG4JEC; lsfg-vk by PancakeTAS and contributors",
-  "Version": "0.6.2",
+  "Version": "0.6.3",
   "ManagerVersion": "0.27.3",
   "Requirements": ["DVVulkan", "DVLangHelper"],
   "AssemblyName": "DVLSFG.dll",

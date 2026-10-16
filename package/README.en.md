@@ -1,4 +1,4 @@
-# DV Scaling 0.6.2 (experimental)
+# DV Scaling 0.6.3 (experimental)
 
 
 ## 0.6.0: AMD FSR FG 3.1
