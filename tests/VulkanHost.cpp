@@ -43,6 +43,7 @@ int main(int argc,char** argv) {
         bool displayProof=false;
         bool deferredFence=false;
         bool presentWait=false;
+        bool pipeline=false;
         for(int arg=1;arg<argc;++arg) {
             std::string value=argv[arg];
             if(value.starts_with("--frames=")) frameCount=std::stoul(value.substr(9));
@@ -52,6 +53,7 @@ int main(int argc,char** argv) {
             if(value=="--deferred-fence") {deferredFence=true; metadata=true;}
             if(value=="--present-wait") {presentWait=true; deferredFence=true; metadata=true;}
             if(value=="--resize-present") { resizePresent=true; metadata=true; }
+            if(value=="--pipeline") {pipeline=true; deferredFence=true; metadata=true;}
         }
         HINSTANCE module=GetModuleHandleW(nullptr);
         WNDCLASSW cls{}; cls.lpfnWndProc=DefWindowProcW; cls.hInstance=module; cls.lpszClassName=L"DVLSFGTest";
@@ -104,6 +106,14 @@ int main(int argc,char** argv) {
         VkCommandBufferAllocateInfo bufferInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO}; bufferInfo.commandPool=pool; bufferInfo.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; bufferInfo.commandBufferCount=1;
         VkCommandBuffer buffer; check(vkAllocateCommandBuffers(device,&bufferInfo,&buffer));
         VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO}; VkSemaphore acquired,ready; check(vkCreateSemaphore(device,&semInfo,nullptr,&acquired)); check(vkCreateSemaphore(device,&semInfo,nullptr,&ready));
+        VkCommandBuffer buffers[2]{buffer,VK_NULL_HANDLE};
+        VkSemaphore available[2]{acquired,VK_NULL_HANDLE},rendered[2]{ready,VK_NULL_HANDLE};
+        VkFence receipts[2]{};
+        if(pipeline) {
+            check(vkAllocateCommandBuffers(device,&bufferInfo,&buffers[1]));
+            check(vkCreateSemaphore(device,&semInfo,nullptr,&available[1]));
+            check(vkCreateSemaphore(device,&semInfo,nullptr,&rendered[1]));
+        }
         auto testStart=std::chrono::steady_clock::now();
         auto nativeModule=GetModuleHandleW(L"DVLSFG.Native.dll");
         using SetLimit=void(*)(int);
@@ -169,6 +179,11 @@ int main(int argc,char** argv) {
             });
         }
         for(unsigned frame=0;frame<frameCount;++frame) {
+            if(pipeline) {
+                unsigned slot=frame%2;
+                if(receipts[slot]) {check(vkWaitForFences(device,1,&receipts[slot],VK_TRUE,5000000000)); vkDestroyFence(device,receipts[slot],nullptr); receipts[slot]=VK_NULL_HANDLE;}
+                buffer=buffers[slot]; acquired=available[slot]; ready=rendered[slot];
+            }
             if(recoverySettings) {
                 if(frame==2) { if(!setGeneration(2,0,.25f)) throw std::runtime_error("Recovery request rejected prematurely"); }
                 if(frame==3) { if(!setGeneration(2,0,1.f)) throw std::runtime_error("Restoring already-active settings was rejected"); }
@@ -271,12 +286,18 @@ int main(int argc,char** argv) {
             if(presentResult!=VK_ERROR_OUT_OF_DATE_KHR) check(presentResult);
             std::cout<<"Host frame "<<frame<<": presented, result="<<presentResult<<std::endl;
             if(!deferredFence) check(vkQueueWaitIdle(queue));
-            if(metadata) {
+            if(metadata && !pipeline) {
                 if(presentWait) {
                     auto wait=reinterpret_cast<PFN_vkWaitForPresentKHR>(vkGetDeviceProcAddr(device,"vkWaitForPresentKHR"));
                     auto immediate=wait(device,swapchain,id,0);
-                    if(immediate!=VK_SUCCESS && immediate!=VK_TIMEOUT) check(immediate);
-                    check(wait(device,swapchain,id,5000000000));
+                    // An asynchronous present can be accepted before a resize
+                    // is reported by WSI. WaitForPresent may return OUT_OF_DATE
+                    // even though the queued application fence must complete.
+                    if(resizePresent && immediate==VK_ERROR_OUT_OF_DATE_KHR) presentResult=immediate;
+                    else if(immediate!=VK_SUCCESS && immediate!=VK_TIMEOUT) check(immediate);
+                    auto waited=wait(device,swapchain,id,5000000000);
+                    if(resizePresent && waited==VK_ERROR_OUT_OF_DATE_KHR) presentResult=waited;
+                    else check(waited);
                 }
                 if(deferredFence) {
                     auto state=vkGetFenceStatus(device,presentFence);
@@ -289,6 +310,10 @@ int main(int argc,char** argv) {
                 vkDestroyFence(device,presentFence,nullptr);
                 if(requestedMode!=VK_PRESENT_MODE_FIFO_KHR || presentMode.pNext!=&presentId || presentId.pNext!=&presentFences) throw std::runtime_error("Caller metadata was mutated");
             }
+            if(pipeline) {
+                receipts[frame%2]=presentFence;
+                if(requestedMode!=VK_PRESENT_MODE_FIFO_KHR || presentMode.pNext!=&presentId || presentId.pNext!=&presentFences) throw std::runtime_error("Pipelined caller metadata was mutated");
+            }
             if(resizePresent && (frame==3 || frame==7 || presentResult==VK_ERROR_OUT_OF_DATE_KHR || presentResult==VK_SUBOPTIMAL_KHR)) {
                 check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical,surface,&caps)); size=caps.currentExtent; swapInfo.imageExtent=size;
                 auto old=swapchain; swapInfo.oldSwapchain=old;
@@ -296,6 +321,7 @@ int main(int argc,char** argv) {
                 check(vkGetSwapchainImagesKHR(device,swapchain,&imagesCount,nullptr)); images.resize(imagesCount); check(vkGetSwapchainImagesKHR(device,swapchain,&imagesCount,images.data()));
             }
         }
+        for(auto receipt:receipts) if(receipt) {check(vkWaitForFences(device,1,&receipt,VK_TRUE,5000000000)); vkDestroyFence(device,receipt,nullptr);}
         auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-testStart).count();
         if(displayProof) {
             sampling=false; sampler.join();
@@ -311,7 +337,7 @@ int main(int argc,char** argv) {
             get(status,sizeof(status),&real,&generated);
             std::cout<<"Native counters: real="<<real<<" generated="<<generated<<std::endl;
         }
-        vkDestroySemaphore(device,ready,nullptr); vkDestroySemaphore(device,acquired,nullptr); vkDestroyCommandPool(device,pool,nullptr);
+        for(unsigned i=0;i<(pipeline ? 2u : 1u);++i) {vkDestroySemaphore(device,rendered[i],nullptr); vkDestroySemaphore(device,available[i],nullptr);} vkDestroyCommandPool(device,pool,nullptr);
         std::cout<<"Destroy swapchain"<<std::endl;
         vkDestroySwapchainKHR(device,swapchain,nullptr);
         std::cout<<"Destroy device"<<std::endl;

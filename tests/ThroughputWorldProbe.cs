@@ -19,6 +19,8 @@ namespace DVLSFGTests {
         static readonly CultureInfo Inv=CultureInfo.InvariantCulture;
         [DllImport("kernel32.dll")] static extern bool QueryPerformanceCounter(out long value);
         [DllImport("kernel32.dll")] static extern bool QueryPerformanceFrequency(out long value);
+        [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_SetLegacyPresentWait(int enabled);
+        [DllImport("DVLSFG.Native",CallingConvention=CallingConvention.Cdecl)] static extern void DVLSFG_SetPacingHeadroom(float value);
         static double Qpc() {long stamp,frequency; QueryPerformanceCounter(out stamp); QueryPerformanceFrequency(out frequency); return stamp/(double)frequency;}
         static long Stamp() {return Stopwatch.GetTimestamp();}
         static double Elapsed(long start) {return (Stamp()-start)*1000.0/Stopwatch.Frequency;}
@@ -39,7 +41,7 @@ namespace DVLSFGTests {
         static void CapturePostfix(long __state) {captureMs+=Elapsed(__state);}
         public static IEnumerator Run(UnityModManager.ModEntry entry) {
             var settings=(Settings)AccessTools.Field(typeof(Main),"settings").GetValue(null);
-            bool enabled=settings.Enabled; int limit=Application.targetFrameRate;
+            bool enabled=settings.Enabled; int limit=Application.targetFrameRate,queued=QualitySettings.maxQueuedFrames;
             var preferences=AccessTools.TypeByName("GamePreferences");
             var key=Enum.Parse(AccessTools.TypeByName("Preferences"),"FrameLimit");
             var get=AccessTools.GetDeclaredMethods(preferences).Find(m=>m.Name=="Get" && m.IsGenericMethodDefinition).MakeGenericMethod(typeof(int));
@@ -54,7 +56,7 @@ namespace DVLSFGTests {
             harmony.Patch(AccessTools.Method(typeof(SceneUiCapture),"RenderUi"),new HarmonyMethod(typeof(ThroughputWorldProbe),"UiPrefix"),new HarmonyMethod(typeof(ThroughputWorldProbe),"UiPostfix"));
             harmony.Patch(AccessTools.Method(typeof(SceneUiCapture),"Capture"),new HarmonyMethod(typeof(ThroughputWorldProbe),"CapturePrefix"),new HarmonyMethod(typeof(ThroughputWorldProbe),"CapturePostfix"));
             string command=""; var samples=new List<string>();
-            Action flush=()=> {if(command.Length>0) File.WriteAllText(Path.Combine(entry.Path,"throughput-"+command.Split(';')[0]+".csv"),"qpc,frame_ms,ui_ms,capture_ms,ui_calls,canvases,target,vsync,layers,ui_redrawn\n"+string.Join("\n",samples.ToArray()));};
+            Action flush=()=> {if(command.Length>0) File.WriteAllText(Path.Combine(entry.Path,"throughput-"+command.Split(';')[0]+".csv"),"qpc,frame_ms,ui_ms,capture_ms,ui_calls,canvases,target,vsync,layers,ui_redrawn,queued\n"+string.Join("\n",samples.ToArray()));};
             File.WriteAllText(Path.Combine(entry.Path,"throughput-ready.txt"),DateTime.UtcNow.ToString("O"));
             try {
                 while(File.Exists(Path.Combine(entry.Path,"throughput-live.txt"))) {
@@ -66,17 +68,22 @@ namespace DVLSFGTests {
                     if(next.Length>0 && next!=command) {
                         flush(); samples.Clear(); var fields=next.Split(';');
                         freeze=fields[2]=="freeze"; legacy=fields[2]=="legacy"; settings.Enabled=bool.Parse(fields[1]);
+                        DVLSFG_SetLegacyPresentWait(fields[2]=="serial" ? 1 : 0);
+                        DVLSFG_SetPacingHeadroom(fields[2]=="exact" ? 1f : fields[2]=="fast" ? .9f : .98f);
+                        QualitySettings.maxQueuedFrames=fields[2].StartsWith("queue") ? int.Parse(fields[2].Substring(5)) : queued;
                         changeLimit(int.Parse(fields[3]));
                         AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
                         command=next; File.WriteAllText(Path.Combine(entry.Path,"throughput-ack.txt"),command);
                     }
-                    if(command.Length>0) samples.Add(string.Format(Inv,"{0:F6},{1:F5},{2:F5},{3:F5},{4},{5},{6},{7},{8},{9}",Qpc(),Time.unscaledDeltaTime*1000,uiMs,captureMs,uiCalls,canvasCount,Application.targetFrameRate,QualitySettings.vSyncCount,layerCount,redrawn));
+                    if(command.Length>0) samples.Add(string.Format(Inv,"{0:F6},{1:F5},{2:F5},{3:F5},{4},{5},{6},{7},{8},{9},{10}",Qpc(),Time.unscaledDeltaTime*1000,uiMs,captureMs,uiCalls,canvasCount,Application.targetFrameRate,QualitySettings.vSyncCount,layerCount,redrawn,QualitySettings.maxQueuedFrames));
                     uiMs=captureMs=0; uiCalls=0;
                     yield return null;
                 }
             } finally {
                 flush(); freeze=legacy=false; harmony.UnpatchAll(harmony.Id);
-                settings.Enabled=enabled; Application.targetFrameRate=limit;
+                DVLSFG_SetLegacyPresentWait(0);
+                DVLSFG_SetPacingHeadroom(.98f);
+                settings.Enabled=enabled; Application.targetFrameRate=limit; QualitySettings.maxQueuedFrames=queued;
                 changeLimit(savedLimit);
                 AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
             }

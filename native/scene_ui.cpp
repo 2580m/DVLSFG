@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 #include <atomic>
 #include <array>
+#include <algorithm>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -144,6 +145,12 @@ struct UiComposite::State {
     VkSampler sampler{}; VkDescriptorSetLayout setLayout{}; VkPipelineLayout layout{}; VkPipeline pipeline{}; VkDescriptorPool pool{};
     std::vector<VkImageView> views; std::vector<VkDescriptorSet> sets;
     std::shared_ptr<void> retained;
+    VkQueryPool profileQueries{};
+    float timestampPeriod{};
+    uint64_t timestampMask=UINT64_MAX;
+    bool profilePending{};
+    unsigned profileCount{};
+    std::array<double,3> profileSum{};
     template<class T> T fn(const char* name) const {auto value=reinterpret_cast<T>(Layer::ovkGetDeviceProcAddr(device,name)); if(!value) throw std::runtime_error(name); return value;}
     static void check(VkResult result) {if(result!=VK_SUCCESS) throw std::runtime_error("UI compositor Vulkan result "+std::to_string(result));}
     void clearBindings() {
@@ -154,6 +161,7 @@ struct UiComposite::State {
     }
     ~State() {
         clearBindings();
+        if(profileQueries) fn<PFN_vkDestroyQueryPool>("vkDestroyQueryPool")(device,profileQueries,nullptr);
         if(pipeline) fn<PFN_vkDestroyPipeline>("vkDestroyPipeline")(device,pipeline,nullptr);
         if(layout) fn<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout")(device,layout,nullptr);
         if(setLayout) fn<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout")(device,setLayout,nullptr);
@@ -163,9 +171,40 @@ struct UiComposite::State {
         VkImageViewCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO}; info.image=image; info.viewType=VK_IMAGE_VIEW_TYPE_2D; info.format=format; info.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
         VkImageView result{}; check(fn<PFN_vkCreateImageView>("vkCreateImageView")(device,&info,nullptr,&result)); views.push_back(result); return result;
     }
+    void profile(VkCommandBuffer command,unsigned slot,bool start) {
+        if(!profileQueries) return;
+        if(slot==0 && start) {
+            if(profilePending) {
+                std::array<uint64_t,6> stamps{};
+                auto result=fn<PFN_vkGetQueryPoolResults>("vkGetQueryPoolResults")(device,profileQueries,0,6,sizeof(stamps),stamps.data(),sizeof(uint64_t),VK_QUERY_RESULT_64_BIT);
+                if(result==VK_SUCCESS) {
+                    for(unsigned i=0;i<3;++i) profileSum[i]+=((stamps[i*2+1]-stamps[i*2])&timestampMask)*timestampPeriod/1e6;
+                    if(++profileCount==120) {
+                        DVLSFG::status("UI composite GPU ms (120 frames): scene="+std::to_string(profileSum[0]/120)+" real="+std::to_string(profileSum[1]/120)+" generated="+std::to_string(profileSum[2]/120));
+                        profileSum={}; profileCount=0;
+                    }
+                }
+            }
+            fn<PFN_vkCmdResetQueryPool>("vkCmdResetQueryPool")(command,profileQueries,0,6); profilePending=true;
+        }
+        fn<PFN_vkCmdWriteTimestamp>("vkCmdWriteTimestamp")(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,profileQueries,slot*2+(start ? 0 : 1));
+    }
 };
 UiComposite::UiComposite(VkDevice device,VkPhysicalDevice physical,VkExtent2D extent,VkFormat swapchainFormat):state(std::make_shared<State>()) {
     auto& s=*state; s.device=device; s.extent=extent;
+    wchar_t modulePath[32768]{};
+    auto nativeModule=GetModuleHandleW(L"DVLSFG.Native.dll");
+    std::error_code profileError;
+    if(nativeModule && GetModuleFileNameW(nativeModule,modulePath,32768) && std::filesystem::exists(std::filesystem::path(modulePath).parent_path()/L"profile.request",profileError)) {
+        VkPhysicalDeviceProperties properties{}; Layer::ovkGetPhysicalDeviceProperties(physical,&properties);
+        uint32_t count{}; Layer::ovkGetPhysicalDeviceQueueFamilyProperties(physical,&count,nullptr);
+        std::vector<VkQueueFamilyProperties> families(count); Layer::ovkGetPhysicalDeviceQueueFamilyProperties(physical,&count,families.data());
+        unsigned bits=64; for(auto& family:families) if(family.queueFlags&(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT)) bits=std::min(bits,family.timestampValidBits);
+        if(properties.limits.timestampComputeAndGraphics && bits) {
+            VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO}; query.queryType=VK_QUERY_TYPE_TIMESTAMP; query.queryCount=6;
+            if(s.fn<PFN_vkCreateQueryPool>("vkCreateQueryPool")(device,&query,nullptr,&s.profileQueries)==VK_SUCCESS) {s.timestampPeriod=properties.limits.timestampPeriod; s.timestampMask=bits==64 ? UINT64_MAX : (uint64_t(1)<<bits)-1;}
+        }
+    }
     s.encoded=swapchainFormat!=VK_FORMAT_B8G8R8A8_SRGB && swapchainFormat!=VK_FORMAT_R8G8B8A8_SRGB;
     HANDLE handle{}; s.output=Mini::Image(device,physical,extent,VK_FORMAT_R16G16B16A16_SFLOAT,VK_IMAGE_USAGE_STORAGE_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&handle);
     s.presented=Mini::Image(device,physical,extent,VK_FORMAT_R16G16B16A16_SFLOAT,VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&handle);
@@ -207,8 +246,12 @@ void UiComposite::prepare(const SceneUiFrame& frame,const std::vector<VkImage>& 
     s.bindingsReady=true;
 }
 VkImage UiComposite::presentedImage() const {return state->presented.handle();}
+bool UiComposite::matches(const SceneUiFrame& frame) const {return state->bindingsReady && state->retained==frame.resources;}
 VkImage UiComposite::record(VkCommandBuffer command,size_t index,bool sceneOnly,bool realScene,bool overlayMask) {
     auto& s=*state;
+    bool profile=!overlayMask && (sceneOnly || realScene || index==0);
+    unsigned slot=sceneOnly ? 0 : realScene ? 1 : 2;
+    if(profile) s.profile(command,slot,true);
     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}; b.image=s.output.handle(); b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_GENERAL; b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b.srcAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     Layer::ovkCmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,0,nullptr,0,nullptr,1,&b);
     s.fn<PFN_vkCmdBindPipeline>("vkCmdBindPipeline")(command,VK_PIPELINE_BIND_POINT_COMPUTE,s.pipeline);
@@ -218,6 +261,7 @@ VkImage UiComposite::record(VkCommandBuffer command,size_t index,bool sceneOnly,
     s.fn<PFN_vkCmdDispatch>("vkCmdDispatch")(command,(s.extent.width+7)/8,(s.extent.height+7)/8,1);
     b.oldLayout=VK_IMAGE_LAYOUT_GENERAL; b.newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; b.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
     Layer::ovkCmdPipelineBarrier(command,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&b);
+    if(profile) s.profile(command,slot,false);
     return s.output.handle();
 }
 }

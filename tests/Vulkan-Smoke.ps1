@@ -21,7 +21,8 @@ param(
     [switch]$Visible,
     [switch]$ApiDump,
     [switch]$DisplayProof,
-    [switch]$ResizePresent
+    [switch]$ResizePresent,
+    [switch]$Pipeline
 )
 $smokeEnvironmentNames=@('DVLSFG_CONFIG','DVLSFG_TEST_HOST','DVLSFG_AUTO_LAYER','VK_ADD_IMPLICIT_LAYER_PATH','VK_ADD_LAYER_PATH','VK_INSTANCE_LAYERS','VK_LOADER_DEBUG','VK_LOADER_LAYERS_DISABLE','VK_LAYER_SETTINGS_PATH','VK_APIDUMP_DETAILED','VK_APIDUMP_FLUSH','VK_APIDUMP_TIMESTAMP','VK_APIDUMP_LOG_FILENAME')
 $smokePreviousEnvironment=@{}
@@ -62,6 +63,7 @@ $hostArgs=if($Toggle){'--toggle'}elseif($Recreate){'--recreate'}elseif($Metadata
 if($ResizePresent){$hostArgs='--resize-present'}
 if($DeferredFence){$hostArgs+=' --deferred-fence'}
 if($PresentWait){$hostArgs+=' --present-wait'}
+if($Pipeline){$hostArgs+=' --pipeline'}
 if($Live) { $hostArgs='--live'; if($ResizePresent) { $hostArgs+=' --resize-present' } }
 if($LiveSettings) { $hostArgs='--live-settings'; if($ResizePresent) { $hostArgs+=' --resize-present' } }
 if($RecoverySettings) { $hostArgs='--recovery-settings' }

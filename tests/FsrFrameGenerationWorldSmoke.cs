@@ -26,6 +26,7 @@ namespace DVLSFGTests {
         ulong lastReal,lastGenerated;
         public UnityModManager.ModEntry Entry;
         Settings settings;
+        bool loadingDisabled,oldEnabled;
         int oldMode,oldTechnology,oldWidth,oldHeight;
         FullScreenMode oldScreenMode;
         void Log(string text) {Entry.Logger.Log(text); File.AppendAllText(Path.Combine(Entry.Path,"world-framegen.log"),text+"\n");}
@@ -59,6 +60,12 @@ namespace DVLSFGTests {
                 AccessTools.Method(uiType,"ToggleWindow",new[]{typeof(bool)}).Invoke(AccessTools.Field(uiType,"mInstance").GetValue(null),new object[]{false});
                 ((DV.UIFramework.ButtonDV)AccessTools.Field(typeof(MainMenuController),"continueButton").GetValue(activeMenu)).Click();
             } catch(Exception error) {Fail(error); yield break;}
+            if(File.Exists(Path.Combine(Entry.Path,"throughput-live.txt"))) {
+                // Measure steady world rendering, not frame-generation startup
+                // during loading. Native support was initialized by config.ini.
+                oldEnabled=settings.Enabled; loadingDisabled=true; settings.Enabled=false;
+                AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);
+            }
             yield return new WaitForSecondsRealtime(2);
             try {
                 var popup=AccessTools.TypeByName("DV.UI.LauncherController");
@@ -296,6 +303,6 @@ namespace DVLSFGTests {
             }
             Log("PASS "+stage+" camera="+camera.name+" target="+camera.targetTexture.width+"x"+camera.targetTexture.height+" output="+output.width+"x"+output.height+" rendering="+camera.actualRenderingPath+" post-AA="+(post==null ? "no PPV2 layer" : "None")+" scene MSAA disabled, UI/global MSAA="+QualitySettings.antiAliasing+", depth/motion enabled, finite pixels and picking rays");
         }
-        void Restore() {if(movingCamera) {movingCamera.localRotation=originalRotation; movingCamera=null; Application.targetFrameRate=originalFrameLimit;} if(settings!=null) {settings.FsrMode=oldMode; settings.FsrTechnology=oldTechnology;} Screen.SetResolution(oldWidth,oldHeight,oldScreenMode);}
+        void Restore() {if(movingCamera) {movingCamera.localRotation=originalRotation; movingCamera=null; Application.targetFrameRate=originalFrameLimit;} if(settings!=null) {settings.FsrMode=oldMode; settings.FsrTechnology=oldTechnology; if(loadingDisabled) {settings.Enabled=oldEnabled; loadingDisabled=false; AccessTools.Method(typeof(Main),"ApplyEnabled").Invoke(null,null);}} Screen.SetResolution(oldWidth,oldHeight,oldScreenMode);}
     }
 }

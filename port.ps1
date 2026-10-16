@@ -57,7 +57,8 @@ foreach ($file in Get-ChildItem $port -Recurse -File | Where-Object Extension -i
         $s = $s.Replace('std::cerr << "lsfg-vk: Vulkan instance layer initialized successfully.', 'DVLSFG::FsrFrameGeneration::configureInstance(*pInstance, next_vkGetInstanceProcAddr);' + "`n            std::cerr << " + '"lsfg-vk: Vulkan instance layer initialized successfully.')
     }
     if ($file.FullName -match 'include\\context.hpp$' -and $file.FullName -notmatch 'framegen') {
-        $s = $s.Replace('private:', "public:`n    VkResult finishPending();`n    bool hasPendingFence(VkFence fence) const;`n    bool hasPendingPresentId(uint64_t id) const;`n    bool pendingFinished() const;`nprivate:`n    std::shared_ptr<DVLSFG::DeferredPresent> deferredPresent;")
+        $s = $s.Replace('private:', "public:`n    VkResult finishPending(VkFence fence=VK_NULL_HANDLE);`n    VkResult finishPendingId(uint64_t id);`n    bool hasPendingFence(VkFence fence) const;`n    bool hasPendingPresentId(uint64_t id) const;`n    bool pendingFinished(VkFence fence=VK_NULL_HANDLE,uint64_t id=0) const;`n    std::shared_ptr<std::mutex> getSwapchainMutex() const {return chainMutex;}`nprivate:`n    std::shared_ptr<std::mutex> chainMutex=std::make_shared<std::mutex>();`n    VkResult finishPendingCount(size_t count);`n    std::deque<std::shared_ptr<DVLSFG::DeferredPresent>> deferredPresents;")
+        $s = "#include <deque>`n"+$s
         $s = $s.Replace('VkExtent2D extent, const std::vector<VkImage>& swapchainImages);','VkExtent2D extent, const std::vector<VkImage>& swapchainImages, VkFormat swapchainFormat);')
         $s = $s.Replace('~LsContext() = default;','~LsContext() noexcept;')
         $s = $s.Replace('    VkSwapchainKHR swapchain;', '    VkDevice storedDevice{};' + "`n    unsigned long long lastEpoch{};`n    std::chrono::steady_clock::time_point previousInput{}, previousOutput{};`n    double inputPeriodSeconds{}, previousPacingSeconds{};`n    int previousLimit{};`n    VkFormat swapchainFormat{};`n    VkSwapchainKHR swapchain;")
@@ -121,6 +122,9 @@ std::string Utils::getConfigFile() {
         $s = $s.Replace('    VkResult ovkCreateSwapchainKHR(', "    VkResult ovkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* count, VkPresentModeKHR* modes);`n    VkResult ovkCreateSwapchainKHR(")
     }
     if ($file.FullName -match 'src\\hooks.cpp$') {
+        # Two in-flight source frames need their own generated images in addition
+        # to the application's queued originals and the WSI-owned image.
+        $s = $s.Replace('createInfo.minImageCount = createInfo.minImageCount + 1','createInfo.minImageCount = createInfo.minImageCount + (Config::activeConf.multiplier==2 && deviceInfo.presentQueue ? 3u : 1u)')
         $s = '#include "present_chain.hpp"' + "`n" + $s
         $s = '#include <mutex>' + "`n" + $s
         $s = $s.Replace('namespace {', 'namespace {' + "`n    std::recursive_mutex framegenLock;")
@@ -231,6 +235,7 @@ if (pPresentInfo->swapchainCount != 1) return Layer::ovkQueuePresentKHR(queue, p
         // Complete a previous deferred real present before all pass-through
         // paths as well, including disabled generation and unsupported metadata.
         for(auto& [handle,context]:swapchains) {
+            if(DVLSFG::isEnabled() && pPresentInfo->swapchainCount==1 && handle==pPresentInfo->pSwapchains[0]) continue;
             auto result=context.finishPending();
             // Still forward this call's waits and present fence after a resize;
             // returning the older error here would strand DXVK's current frame.
@@ -249,8 +254,8 @@ if (pPresentInfo->swapchainCount != 1) return Layer::ovkQueuePresentKHR(queue, p
     VkResult myvkGetFenceStatus(VkDevice device,VkFence fence) noexcept {
         std::lock_guard<std::recursive_mutex> guard(framegenLock);
         if(auto* context=pendingFence(device,fence)) {
-            if(!context->pendingFinished()) return VK_NOT_READY;
-            context->finishPending();
+            if(!context->pendingFinished(fence)) return VK_NOT_READY;
+            context->finishPending(fence);
         }
         auto get=reinterpret_cast<PFN_vkGetFenceStatus>(Layer::ovkGetDeviceProcAddr(device,"vkGetFenceStatus"));
         return get(device,fence);
@@ -285,13 +290,13 @@ if (pPresentInfo->swapchainCount != 1) return Layer::ovkQueuePresentKHR(queue, p
     }
     VkResult myvkResetFences(VkDevice device,uint32_t count,const VkFence* fences) noexcept {
         std::lock_guard<std::recursive_mutex> guard(framegenLock);
-        for(uint32_t i=0;i<count;++i) if(auto* context=pendingFence(device,fences[i])) context->finishPending();
+        for(uint32_t i=0;i<count;++i) if(auto* context=pendingFence(device,fences[i])) context->finishPending(fences[i]);
         auto reset=reinterpret_cast<PFN_vkResetFences>(Layer::ovkGetDeviceProcAddr(device,"vkResetFences"));
         return reset(device,count,fences);
     }
     void myvkDestroyFence(VkDevice device,VkFence fence,const VkAllocationCallbacks* allocator) noexcept {
         std::lock_guard<std::recursive_mutex> guard(framegenLock);
-        if(auto* context=pendingFence(device,fence)) context->finishPending();
+        if(auto* context=pendingFence(device,fence)) context->finishPending(fence);
         auto destroy=reinterpret_cast<PFN_vkDestroyFence>(Layer::ovkGetDeviceProcAddr(device,"vkDestroyFence"));
         destroy(device,fence,allocator);
     }
@@ -305,8 +310,8 @@ if (pPresentInfo->swapchainCount != 1) return Layer::ovkQueuePresentKHR(queue, p
                 std::lock_guard<std::recursive_mutex> guard(framegenLock);
                 auto context=swapchains.find(chain);
                 if(context!=swapchains.end() && context->second.hasPendingPresentId(id)) {
-                    pending=!context->second.pendingFinished();
-                    if(!pending) context->second.finishPending();
+                    pending=!context->second.pendingFinished(VK_NULL_HANDLE,id);
+                    if(!pending) context->second.finishPendingId(id);
                 }
             }
             const auto elapsed=static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-started).count());
@@ -340,9 +345,34 @@ if (pPresentInfo->swapchainCount != 1) return Layer::ovkQueuePresentKHR(queue, p
         auto wait=reinterpret_cast<PFN_vkDeviceWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkDeviceWaitIdle"));
         return wait(device);
     }
+    std::shared_ptr<std::mutex> swapchainMutex(VkSwapchainKHR chain) {
+        std::lock_guard<std::recursive_mutex> guard(framegenLock);
+        auto found=swapchains.find(chain);
+        return found==swapchains.end() ? nullptr : found->second.getSwapchainMutex();
+    }
+    template<class Acquire> VkResult serializedAcquire(VkSwapchainKHR chain,uint64_t timeout,Acquire acquire) {
+        auto mutex=swapchainMutex(chain);
+        if(!mutex) return acquire(timeout);
+        const auto start=std::chrono::steady_clock::now();
+        for(;;) {
+            VkResult result;
+            {std::lock_guard guard(*mutex); result=acquire(0);}
+            if(result!=VK_NOT_READY && result!=VK_TIMEOUT) return result;
+            if(timeout==0) return VK_NOT_READY;
+            if(timeout!=UINT64_MAX && std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-start).count()>=timeout) return VK_TIMEOUT;
+            std::this_thread::yield();
+        }
+    }
+    VkResult myvkAcquireNextImageKHR(VkDevice device,VkSwapchainKHR chain,uint64_t timeout,VkSemaphore semaphore,VkFence fence,uint32_t* index) noexcept {
+        return serializedAcquire(chain,timeout,[&](uint64_t wait) {return Layer::ovkAcquireNextImageKHR(device,chain,wait,semaphore,fence,index);});
+    }
+    VkResult myvkAcquireNextImage2KHR(VkDevice device,const VkAcquireNextImageInfoKHR* info,uint32_t* index) noexcept {
+        auto acquire=reinterpret_cast<PFN_vkAcquireNextImage2KHR>(Layer::ovkGetDeviceProcAddr(device,"vkAcquireNextImage2KHR"));
+        return serializedAcquire(info->swapchain,info->timeout,[&](uint64_t wait) {auto copy=*info; copy.timeout=wait; return acquire(device,&copy,index);});
+    }
     /// Erase the swapchain context and mapping
 '@)
-        $s = $s.Replace('    // swapchain hooks', '    {"vkDeviceWaitIdle", reinterpret_cast<PFN_vkVoidFunction>(myvkDeviceWaitIdle)},' + "`n" + '    {"vkQueueWaitIdle", reinterpret_cast<PFN_vkVoidFunction>(myvkQueueWaitIdle)},' + "`n    // swapchain hooks")
+        $s = $s.Replace('    // swapchain hooks', '    {"vkDeviceWaitIdle", reinterpret_cast<PFN_vkVoidFunction>(myvkDeviceWaitIdle)},' + "`n" + '    {"vkQueueWaitIdle", reinterpret_cast<PFN_vkVoidFunction>(myvkQueueWaitIdle)},' + "`n" + '    {"vkAcquireNextImageKHR", reinterpret_cast<PFN_vkVoidFunction>(myvkAcquireNextImageKHR)},' + "`n" + '    {"vkAcquireNextImage2KHR", reinterpret_cast<PFN_vkVoidFunction>(myvkAcquireNextImage2KHR)},' + "`n    // swapchain hooks")
         $s = $s.Replace('    // swapchain hooks', @'
     {"vkGetFenceStatus", reinterpret_cast<PFN_vkVoidFunction>(myvkGetFenceStatus)},
     {"vkWaitForFences", reinterpret_cast<PFN_vkVoidFunction>(myvkWaitForFences)},

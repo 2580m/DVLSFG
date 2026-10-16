@@ -18,6 +18,8 @@
 namespace {
 using OutputStamp=std::pair<std::chrono::steady_clock::time_point,bool>;
 thread_local std::deque<OutputStamp> outputHistory;
+std::atomic<bool> legacyPresentWait{false};
+std::atomic<float> pacingHeadroom{.98f};
 void recordOutput(std::chrono::steady_clock::time_point time,bool generated) {
     outputHistory.emplace_back(time,generated);
     if(outputHistory.size()>120) outputHistory.pop_front();
@@ -61,6 +63,29 @@ void waitGeneratedImage(VkDevice device,VkQueue queue) {
     destroy(device,fence,nullptr);
     if(result!=VK_SUCCESS) throw LSFG::vulkan_error(result,"Generated-image readiness wait failed");
 }
+// Observe a GPU event on the presentation worker. The graphics-queue command
+// stream orders all image reads before later Unity writes; presentation still
+// waits on its explicit semaphores. Do not retire acquired-image submissions
+// through a host fence before their images reach the presentation engine.
+class ImageReadiness {
+    VkDevice device{};
+    VkEvent event{};
+    PFN_vkGetEventStatus getFn{};
+    PFN_vkDestroyEvent destroyFn{};
+public:
+    ImageReadiness(VkDevice value,VkCommandBuffer command):device(value) {
+        auto create=reinterpret_cast<PFN_vkCreateEvent>(Layer::ovkGetDeviceProcAddr(device,"vkCreateEvent"));
+        getFn=reinterpret_cast<PFN_vkGetEventStatus>(Layer::ovkGetDeviceProcAddr(device,"vkGetEventStatus"));
+        destroyFn=reinterpret_cast<PFN_vkDestroyEvent>(Layer::ovkGetDeviceProcAddr(device,"vkDestroyEvent"));
+        VkEventCreateInfo desc{VK_STRUCTURE_TYPE_EVENT_CREATE_INFO};
+        auto result=create(device,&desc,nullptr,&event);
+        if(result!=VK_SUCCESS) throw LSFG::vulkan_error(result,"Generated-image event creation failed");
+        auto set=reinterpret_cast<PFN_vkCmdSetEvent>(Layer::ovkGetDeviceProcAddr(device,"vkCmdSetEvent"));
+        set(command,event,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+    VkResult wait() const {for(;;) {auto result=getFn(device,event); if(result==VK_EVENT_SET) return VK_SUCCESS; if(result!=VK_EVENT_RESET) return result; SwitchToThread();}}
+    ~ImageReadiness() {if(event) destroyFn(device,event,nullptr);}
+};
 void completeRejectedPresentFence(VkDevice device,VkQueue queue,const void* metadata,bool queueOnly=false) {
     // Some WSI paths reject a second present on an already-outdated chain
     // without completing its fence. DXVK expects normal swapchain errors to
@@ -108,6 +133,9 @@ void waitUntil(std::chrono::steady_clock::time_point deadline) {
     while(std::chrono::steady_clock::now()<deadline) YieldProcessor();
 }
 }
+// Test-only A/B control; defaults to the pipelined production path.
+extern "C" __declspec(dllexport) void __cdecl DVLSFG_SetLegacyPresentWait(int enabled) {legacyPresentWait.store(enabled!=0);}
+extern "C" __declspec(dllexport) void __cdecl DVLSFG_SetPacingHeadroom(float value) {if(value>=.5f && value<=1) pacingHeadroom.store(value);}
 LsContext::LsContext(const Hooks::DeviceInfo& info,VkSwapchainKHR chain,VkExtent2D size,const std::vector<VkImage>& images,VkFormat sourceFormat)
     : swapchain(chain),swapchainImages(images),extent(size),storedDevice(info.device),swapchainFormat(sourceFormat) {
     const auto& conf=Config::activeConf;
@@ -148,50 +176,80 @@ LsContext::~LsContext() noexcept {
         DVLSFG::status("Destroy context: backend released");
     } catch(...) {}
 }
-VkResult LsContext::finishPending() {
-    if(!deferredPresent) return VK_SUCCESS;
-    deferredPresent->join();
-    previousOutput=deferredPresent->submitted;
-    recordOutput(previousOutput,false);
-    auto result=deferredPresent->result;
-    deferredPresent.reset();
-    return result;
-}
-bool LsContext::hasPendingFence(VkFence fence) const {
-    if(!deferredPresent) return false;
-    for(auto* node=static_cast<const VkBaseInStructure*>(deferredPresent->metadata.get());node;node=node->pNext) {
-        if(node->sType!=VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT) continue;
-        auto* value=reinterpret_cast<const VkSwapchainPresentFenceInfoEXT*>(node);
-        if(value->pFences[0]==fence) return true;
+namespace {
+bool usesFence(const DVLSFG::DeferredPresent& present,VkFence fence) {
+    for(auto* node=static_cast<const VkBaseInStructure*>(present.metadata.get());node;node=node->pNext) {
+        if(node->sType==VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT && reinterpret_cast<const VkSwapchainPresentFenceInfoEXT*>(node)->pFences[0]==fence) return true;
     }
     return false;
 }
-bool LsContext::pendingFinished() const {return !deferredPresent || deferredPresent->finished.load();}
-bool LsContext::hasPendingPresentId(uint64_t id) const {return deferredPresent && deferredPresent->metadata.usesId(id);}
+}
+VkResult LsContext::finishPendingCount(size_t count) {
+    VkResult result=VK_SUCCESS;
+    while(count-- && !deferredPresents.empty()) {
+        auto job=deferredPresents.front(); job->join();
+        if(job->generatedSubmitted.time_since_epoch().count()) recordOutput(job->generatedSubmitted,true);
+        if(job->submitted.time_since_epoch().count()) {previousOutput=job->submitted; recordOutput(previousOutput,false);}
+        if(result==VK_SUCCESS || result==VK_SUBOPTIMAL_KHR) result=job->result;
+        deferredPresents.pop_front();
+    }
+    return result;
+}
+VkResult LsContext::finishPending(VkFence fence) {
+    if(!fence) return finishPendingCount(deferredPresents.size());
+    size_t count=0; for(auto& job:deferredPresents) {++count; if(usesFence(*job,fence)) return finishPendingCount(count);}
+    return VK_SUCCESS;
+}
+VkResult LsContext::finishPendingId(uint64_t id) {
+    size_t count=0; for(auto& job:deferredPresents) {++count; if(job->metadata.usesId(id)) return finishPendingCount(count);}
+    return VK_SUCCESS;
+}
+bool LsContext::hasPendingFence(VkFence fence) const {
+    for(auto& job:deferredPresents) if(usesFence(*job,fence)) return true;
+    return false;
+}
+bool LsContext::pendingFinished(VkFence fence,uint64_t id) const {
+    for(auto& job:deferredPresents) if((!fence && !id) || (fence && usesFence(*job,fence)) || (id && job->metadata.usesId(id))) {if(!job->finished.load()) return false;}
+    return true;
+}
+bool LsContext::hasPendingPresentId(uint64_t id) const {
+    for(auto& job:deferredPresents) if(job->metadata.usesId(id)) return true;
+    return false;
+}
 VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQueue queue,const std::vector<VkSemaphore>& waits,uint32_t index) {
-    auto pendingResult=finishPending();
-    if(pendingResult!=VK_SUCCESS && pendingResult!=VK_SUBOPTIMAL_KHR) return pendingResult;
+    size_t completed=0; for(auto& job:deferredPresents) {if(!job->finished.load()) break; ++completed;}
+    auto pendingResult=finishPendingCount(completed);
     auto ui=DVLSFG::acquireSceneUi(info.device,extent);
     const bool fsr=bool(fsrFrameGeneration);
-    if((DVLSFG::sceneUiRequested() && (!ui || ui->serial==lastSceneSerial)) || (fsr && (!ui || !ui->depth.image || !ui->motion.image))) {
+    if((pendingResult!=VK_SUCCESS && pendingResult!=VK_SUBOPTIMAL_KHR) || (DVLSFG::sceneUiRequested() && (!ui || ui->serial==lastSceneSerial)) || (fsr && (!ui || !ui->depth.image || !ui->motion.image))) {
         // Menu/loading frames retain ordinary presentation, never UI interpolation.
+        finishPending();
         VkPresentInfoKHR actual{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR}; actual.pNext=pNext;
         actual.waitSemaphoreCount=static_cast<uint32_t>(waits.size()); actual.pWaitSemaphores=waits.data();
         actual.swapchainCount=1; actual.pSwapchains=&swapchain; actual.pImageIndices=&index;
         lastEpoch=0; previousInput={}; previousOutput={};
-        return Layer::ovkQueuePresentKHR(queue,&actual);
+        VkResult result;
+        {std::lock_guard guard(*chainMutex); result=Layer::ovkQueuePresentKHR(queue,&actual);}
+        if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_ERROR_SURFACE_LOST_KHR) {waitIdle(info.device); completeRejectedPresentFence(info.device,info.queue.second,pNext);}
+        return result;
     }
+    const auto& conf=Config::activeConf;
+    auto deferred=std::make_shared<DVLSFG::DeferredPresent>();
+    bool async=info.presentQueue && queue==info.queue.second && conf.multiplier==2 && deferred->metadata.build(pNext);
+    bool deferGenerated=async && swapchainImages.size()>=5 && !legacyPresentWait.load();
+    if(!deferGenerated) finishPending();
+    else if(!deferredPresents.empty() && !deferredPresents.back()->pipelined) finishPending();
+    else if(deferredPresents.size()>=2) finishPendingCount(deferredPresents.size()-1);
+    deferred->pipelined=deferGenerated;
     if(ui) {
         if(!uiComposite) uiComposite=std::make_shared<DVLSFG::UiComposite>(info.device,info.physicalDevice,extent,swapchainFormat);
+        if(!uiComposite->matches(*ui)) finishPending();
         std::vector<VkImage> generated; for(auto& image:out_n) generated.push_back(image.handle());
         uiComposite->prepare(*ui,generated); lastSceneSerial=ui->serial;
     }
     auto started=std::chrono::steady_clock::now();
-    const auto& conf=Config::activeConf;
-    auto deferred=std::make_shared<DVLSFG::DeferredPresent>();
-    // Begin with 2x: only the real frame needs deferred presentation. Higher
-    // LSFG multipliers retain the existing synchronous resource ownership.
-    bool async=info.presentQueue && queue==info.queue.second && conf.multiplier==2 && deferred->metadata.build(pNext);
+    // Higher LSFG multipliers retain synchronous resource ownership.
+    std::shared_ptr<ImageReadiness> readiness;
     const auto family=info.queue.first;
     auto epoch=DVLSFG::epoch();
     bool seedBoth=frameIdx==0 || lastEpoch!=epoch;
@@ -208,6 +266,11 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     previousInput=started;
     previousPacingSeconds=0;
     double interval=(sourceLimit>0 ? 1.0/sourceLimit : inputPeriodSeconds)/conf.multiplier;
+    // With both presents paced, using exactly the observed source period makes
+    // our own waits a stable rate limit after any slow frame. A small amount of
+    // headroom lets uncapped pacing converge back to rendering throughput.
+    // Explicit game source limits keep their exact N-times presentation period.
+    if(deferGenerated && sourceLimit<=0) interval*=pacingHeadroom.load();
     auto pace=[&] {
         if(interval>0 && previousOutput.time_since_epoch().count()) {
             auto deadline=previousOutput+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(interval));
@@ -231,7 +294,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         }
         catch(const std::exception& e) { capture=false; DVLSFG::status(std::string("Capture allocation failed: ")+e.what()); }
     }
-    auto& pass=passInfos[0];
+    auto& pass=passInfos[deferGenerated ? frameIdx%passInfos.size() : 0];
     pass=RenderPassInfo{};
     HANDLE inputReady{};
     pass.preCopySemaphores[0]=Mini::Semaphore(info.device,&inputReady);
@@ -332,7 +395,13 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     for(size_t i=0;i<out_n.size();++i) {
         pass.acquireSemaphores.emplace_back(info.device);
         uint32_t target{};
-        result=Layer::ovkAcquireNextImageKHR(info.device,swapchain,100000000,pass.acquireSemaphores.back().handle(),VK_NULL_HANDLE,&target);
+        const auto acquireStart=std::chrono::steady_clock::now();
+        do {
+            {std::lock_guard guard(*chainMutex); result=Layer::ovkAcquireNextImageKHR(info.device,swapchain,0,pass.acquireSemaphores.back().handle(),VK_NULL_HANDLE,&target);}
+            if(result!=VK_NOT_READY && result!=VK_TIMEOUT) break;
+            if(std::chrono::steady_clock::now()-acquireStart>=std::chrono::milliseconds(100)) {result=VK_TIMEOUT; break;}
+            std::this_thread::yield();
+        } while(true);
         if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_ERROR_SURFACE_LOST_KHR || result==VK_TIMEOUT || result==VK_NOT_READY) {
             resizeResult=result==VK_TIMEOUT || result==VK_NOT_READY ? VK_ERROR_OUT_OF_DATE_KHR : result;
             break;
@@ -387,9 +456,15 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         if(!fsr) barrier(copy.handle(),out_n[i].handle(),VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,family,VK_QUEUE_FAMILY_EXTERNAL,ui ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT,0);
         barrier(copy.handle(),swapchainImages[target],VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_QUEUE_FAMILY_IGNORED,VK_QUEUE_FAMILY_IGNORED,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT);
+        if(deferGenerated) readiness=std::make_shared<ImageReadiness>(info.device,copy.handle());
         copy.end();
         std::vector<VkSemaphore> signals{pass.postCopySemaphores[i].handle()};
         copy.submit(info.queue.second,{pass.acquireSemaphores[i].handle(),pass.renderSemaphores[i].handle()},signals);
+        if(deferGenerated) {
+            deferred->addedReady=pass.postCopySemaphores[i]; deferred->generatedIndex=target;
+            ++copiedOutputs; ++presentedOutputs;
+            continue;
+        }
         if(async) waitGeneratedImage(info.device,info.queue.second);
         ++copiedOutputs;
         const auto done=pass.postCopySemaphores[i].handle();
@@ -398,7 +473,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         present.swapchainCount=1; present.pSwapchains=&swapchain; present.pImageIndices=&target;
         if(!async) pace();
         previousOutput=std::chrono::steady_clock::now();
-        result=Layer::ovkQueuePresentKHR(queue,&present);
+        {std::lock_guard guard(*chainMutex); result=Layer::ovkQueuePresentKHR(queue,&present);}
         noteOutput(true);
         if(frameIdx==0) DVLSFG::status("First frame: generated image presented");
         if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_ERROR_SURFACE_LOST_KHR) { resizeResult=result; break; }
@@ -433,33 +508,57 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
         deferred->inputs=ui;
         const auto deadline=previousOutput+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(interval));
         const auto device=info.device; const auto presentQueue=info.presentQueue; const auto chain=swapchain;
-        deferred->worker=std::thread([job=deferred.get(),device,presentQueue,chain,index,deadline,presentedOutputs] {
-            waitUntil(deadline);
+        auto prior=deferredPresents.empty() ? std::shared_ptr<DVLSFG::DeferredPresent>{} : deferredPresents.back();
+        auto mutex=chainMutex;
+        deferred->worker=std::thread([job=deferred.get(),device,presentQueue,chain,index,deadline,presentedOutputs,deferGenerated,readiness,interval,prior,mutex] {
+            // Preserve WSI order and exclusive reserved-queue ownership while
+            // up to two source frames render/compute on the graphics queue.
+            if(prior) prior->join();
+            auto realDeadline=deadline;
+            VkResult generatedResult=VK_SUCCESS;
+            unsigned generatedCount=presentedOutputs;
+            if(deferGenerated) {
+                auto ready=readiness->wait();
+                if(ready!=VK_SUCCESS) {job->result=ready; job->finished.store(true); return;}
+                if(prior && prior->submitted.time_since_epoch().count()) waitUntil(prior->submitted+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(interval)));
+                const auto semaphore=job->addedReady.handle();
+                VkPresentInfoKHR generated{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+                generated.waitSemaphoreCount=1; generated.pWaitSemaphores=&semaphore;
+                generated.swapchainCount=1; generated.pSwapchains=&chain; generated.pImageIndices=&job->generatedIndex;
+                const auto time=std::chrono::steady_clock::now();
+                {std::lock_guard guard(*mutex); generatedResult=Layer::ovkQueuePresentKHR(presentQueue,&generated);}
+                if(generatedResult==VK_SUCCESS || generatedResult==VK_SUBOPTIMAL_KHR) {
+                    job->generatedSubmitted=time;
+                    realDeadline=time+std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(interval));
+                } else {generatedCount=0; realDeadline={};}
+            }
+            waitUntil(realDeadline);
             const std::array<VkSemaphore,2> semaphores{job->ready[0].handle(),job->ready[1].handle()};
             VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR}; present.pNext=job->metadata.get();
             present.waitSemaphoreCount=2; present.pWaitSemaphores=semaphores.data();
             present.swapchainCount=1; present.pSwapchains=&chain; present.pImageIndices=&index;
             job->submitted=std::chrono::steady_clock::now();
-            job->result=Layer::ovkQueuePresentKHR(presentQueue,&present);
+            {std::lock_guard guard(*mutex); job->result=Layer::ovkQueuePresentKHR(presentQueue,&present);}
             // This queue belongs exclusively to this worker. Do not wait the
             // whole device while DXVK is submitting the next scene in parallel.
             auto idle=reinterpret_cast<PFN_vkQueueWaitIdle>(Layer::ovkGetDeviceProcAddr(device,"vkQueueWaitIdle"));
             auto idleResult=idle(presentQueue);
             if(job->result==VK_SUCCESS || job->result==VK_SUBOPTIMAL_KHR) {
                 if(idleResult!=VK_SUCCESS) job->result=idleResult;
-                else DVLSFG::countFrame(presentedOutputs);
+                else {DVLSFG::countFrame(generatedCount); if(generatedResult!=VK_SUCCESS) job->result=generatedResult;}
             } else if(idleResult==VK_SUCCESS) {
                 try {completeRejectedPresentFence(device,presentQueue,job->metadata.get(),true);}
                 catch(const std::exception& e) {DVLSFG::status(std::string("Deferred resize completion failed: ")+e.what()); job->result=VK_ERROR_DEVICE_LOST;}
             }
             job->finished.store(true);
         });
-        deferredPresent=deferred;
-        if(frameIdx==0) DVLSFG::status("2x presentation pacing on reserved queue (overlaps next game render)");
+        deferredPresents.push_back(deferred);
+        if(frameIdx==0) DVLSFG::status(deferGenerated ? "2x bounded two-frame GPU/presentation pipeline" : "2x presentation pacing on reserved queue (overlaps next game render)");
     } else {
+        finishPending();
         pace();
         previousOutput=std::chrono::steady_clock::now();
-        result=Layer::ovkQueuePresentKHR(queue,&actual);
+        {std::lock_guard guard(*chainMutex); result=Layer::ovkQueuePresentKHR(queue,&actual);}
         noteOutput(false);
         bool realPresented=result==VK_SUCCESS || result==VK_SUBOPTIMAL_KHR;
         if(!realPresented && result!=VK_ERROR_OUT_OF_DATE_KHR && result!=VK_ERROR_SURFACE_LOST_KHR) throw LSFG::vulkan_error(result,"Real-frame present failed");
@@ -474,7 +573,7 @@ VkResult LsContext::present(const Hooks::DeviceInfo& info,const void* pNext,VkQu
     if(frameIdx==1) DVLSFG::status("Frame generation active");
     if(capture && copiedOutputs) {
         try {
-            if(deferredPresent) finishPending();
+            finishPending();
             auto directory=DVLSFG::captureDirectory(); std::filesystem::create_directories(directory);
             auto name="frame-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(frameIdx)+"-"+std::to_string(GetTickCount64());
             inputCapture.save(directory/(name+"-input.bmp"),swapchainFormat);

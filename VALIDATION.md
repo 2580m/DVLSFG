@@ -1236,3 +1236,69 @@ The final run passed all target/context assertions over 857 sampled frames
 (355 paused) with zero SR resets, creations or releases. Twelve native
 automatic/stashed thumbnail checks across SR off/FSR1/FSR3 and FG off/on also
 passed the nonblank-pixel and unchanged-camera-target checks.
+
+## 1440p frame generation throughput diagnosis (2026-10-16)
+
+The reported 180–200 versus approximately 100 FPS was reproduced at 2560x1440
+with FSR 3.1 SR balanced. In a fixed-view, single-process comparison, FG off
+measured 188.04–189.06 source/submitted FPS; FSR FG 2x measured
+106.32–106.57 source FPS and 212.49–213.16 submitted FPS. Displayed throughput
+was approximately 164–165 FPS in both cases on the 165 Hz desktop. The source
+penalty is real even though the final FG submission rate exceeds the original
+game's submission rate.
+
+The UI cache remained effective (zero redraws in these samples, about
+0.116–0.118 ms CPU). Skipping its checks yielded 106.72 source FPS, and changing
+Unity's maximum queued frames from 1 to 3 yielded 102.36–105.80 FPS, neither
+explaining the penalty. Optional GPU timestamps measured roughly 1.9–2.0 ms
+for FSR prepare/optical flow/interpolation, and 0.32 ms for the three UI
+compositor dispatches. These GPU intervals overlap the roughly 3.8 ms native
+present CPU interval and must not be added to it as independent costs.
+
+Raw evidence, candidate comparisons and fresh user backups are retained under
+ignored `build/fg-performance-1440`.
+
+The shipping 2x path submits all scene/interpolation/UI work on the graphics
+queue, observes generated-image readiness on a worker using a device event,
+and presents in order on the reserved queue. It permits at most two source
+frames in flight and rotates command/semaphore resources. The swapchain
+reserves additional images for the application's originals and generated
+frames. Acquire and present access to a swapchain share a host mutex; acquire
+uses nonblocking attempts so it cannot hold that mutex while a pending present
+needs to free an image. Per-fence/ID completion retires only the required jobs.
+Unsupported paths retain the synchronous fallback.
+
+Uncapped pacing includes 2% headroom. With exactly half the observed source
+period between both output frames, pacing can otherwise treat its own waits
+as rendering cost and preserve a low rate after a slow frame. Explicit game
+source limits retain the exact multiplier interval. The opt-in probe exposes
+`serial` and `exact` controls to reproduce the previous wait and feedback
+behavior without changing rendering quality or restarting the process.
+
+Final alternating measurements (`final-comparison`) at the same 1440p view:
+
+| Path | Source FPS | Submitted FPS | Displayed FPS | Source p99 ms |
+| --- | ---: | ---: | ---: | ---: |
+| Previous waits | 108.21 | 216.45 | 164.98 | 10.099 |
+| Bounded pipeline | 119.95 | 240.33 | 164.79 | 9.540 |
+| Previous waits, repeat | 107.08 | 214.23 | 164.86 | 10.358 |
+| Bounded pipeline, repeat | 119.41 | 238.84 | 165.04 | 8.950 |
+
+The improvement was about 11–12%. An earlier shipping-path check measured
+120.34–120.78 source / 240.81–241.57 submitted FPS, and a 60 FPS source limit
+produced 59.50 source / 118.89 submitted and displayed FPS. Native present
+CPU duration fell from approximately 3.8 ms to 0.6–0.8 ms; some waiting now
+occurs outside that interval, so this is not a 3 ms reduction in total frame
+time. GPU utilization sampled around 97% after the change. FSR computation,
+scene rendering, copies and composition still consume GPU time; the change
+does not preserve the FG-off source rate at zero cost. Submitted rates above
+165 are not physically displayed rates on the 165 Hz desktop.
+
+Final Vulkan synchronization/thread validation passed a 48-source-frame test
+with two application frames in flight. Present fence/ID handling, resize
+recovery and live 2x/3x/4x model/flow settings also passed. The FSR FG pixel
+fixture passed moving-scene interpolation (distinct generated pixels with
+nonzero engine motion vectors/depth), SR off/FSR1/FSR3, opaque/translucent UI,
+UI edge AA, resize, UMM pause and camera-space UI bypass. These pixel checks
+ran with profiling disabled. No FG shader or reconstruction quality change
+is part of the shipping optimization.
