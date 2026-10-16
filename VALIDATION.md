@@ -1198,3 +1198,41 @@ Presented UI edge differences between real and generated captures were at
 most one 8-bit RGB step; the actual UI textures updated on color/fade changes.
 Raw traces, probe logs, regression images and original user backups are kept
 locally under ignored `build/fg-performance-optimization`.
+
+## Preserve SR history through native menu snapshots (2026-10-16)
+
+Opening the native pause menu stashes a save screenshot. The game's
+`ScreenshotTaker.TakeScreenshotWithoutUI` temporarily assigns a snapshot
+texture to the active scene camera, renders it and then assigns null instead
+of restoring the previous target. With FSR enabled this loses the owned SR
+target. The following FSR 3.1 LateUpdate releases its context and recreates
+the targets, unnecessarily discarding accumulated scene detail.
+
+The pre-fix world trace recorded `target=none` at Release from LateUpdate,
+with the camera still enabled, active and using the same culling mask. The
+output texture identity changed on menu opening. This also reproduced with
+frame generation off, locating the resource loss before frame generation.
+
+A scoped screenshot patch now saves an FSR-owned scene target and restores
+it after the native screenshot returns (including exception cleanup). It
+applies to FSR 1 and FSR 3, preserves the native snapshot rendering, and does
+not disable genuine camera-cut history resets or steal targets from other
+renderers.
+
+In the first fixed world run at 2560x1440, native snapshot target identity
+was preserved. Across two pause/unpause cycles with FG off and two with FSR
+FG on, the same FSR output remained allocated and no context creation or
+release occurred. All 340 sampled paused frames had zero SR history resets.
+Twelve consecutive 256x256 scene-output crops per segment showed mean
+adjacent-frame RGB changes of about 0.079–0.082 out of 255 in both paused and
+running segments. This measures the sampled scene region, not every pixel
+or every camera configuration.
+
+The opt-in `pause-test.txt` world fixture records resets, target identity and
+release call stacks; it asserts native screenshot target restoration and
+unchanged SR targets/context across menu transitions. Evidence and fresh
+user-data backups are retained under ignored `build/pause-history`.
+The final run passed all target/context assertions over 857 sampled frames
+(355 paused) with zero SR resets, creations or releases. Twelve native
+automatic/stashed thumbnail checks across SR off/FSR1/FSR3 and FG off/on also
+passed the nonblank-pixel and unchanged-camera-target checks.

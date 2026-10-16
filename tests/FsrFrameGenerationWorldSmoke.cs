@@ -70,6 +70,10 @@ namespace DVLSFGTests {
             if(!Find()) {Fail(new Exception("FSR3 world camera did not become ready")); yield break;}
             Log("World targetFrameRate="+Application.targetFrameRate+" vSyncCount="+QualitySettings.vSyncCount+" refresh="+Screen.currentResolution.refreshRate);
             if(File.Exists(Path.Combine(Entry.Path,"thumbnail-first.txt"))) yield return CheckSaveThumbnails();
+            if(File.Exists(Path.Combine(Entry.Path,"pause-test.txt"))) {
+                yield return PauseWorldProbe.Run(Entry);
+                Restore(); yield break;
+            }
             if(File.Exists(Path.Combine(Entry.Path,"throughput-live.txt"))) {
                 yield return ThroughputWorldProbe.Run(Entry);
                 Restore(); yield break;
@@ -163,10 +167,13 @@ namespace DVLSFGTests {
                             if(generated<=beforeGenerated) {passed=false; Log("FAIL frame generation did not advance for upscaler "+upscaler);}
                         }
                         foreach(bool stashed in new[]{false,true}) {
+                            var activeCamera=(Camera)AccessTools.Property(AccessTools.TypeByName("PlayerManager"),"ActiveCamera").GetValue(null,null);
+                            var previousTarget=activeCamera.targetTexture;
                             AccessTools.Method(managerType,"ClearStashedScreenshot").Invoke(manager,null);
                             string active=RenderTexture.active ? RenderTexture.active.name : "screen";
                             if(stashed) AccessTools.Method(managerType,"StashScreenshot").Invoke(manager,null);
                             var image=(Texture2D)AccessTools.Method(managerType,"GetThumbnail").Invoke(manager,null);
+                            if(activeCamera.targetTexture!=previousTarget) {passed=false; Log("FAIL snapshot changed scene camera target for upscaler "+upscaler);}
                             var pixels=image.GetPixels32(); double sum=0,squares=0;
                             foreach(var pixel in pixels) {double value=(pixel.r+pixel.g+pixel.b)/3.0; sum+=value; squares+=value*value;}
                             double mean=sum/pixels.Length,variance=squares/pixels.Length-mean*mean;

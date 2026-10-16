@@ -18,7 +18,7 @@ foreach($ref in @('UnityModManager/UnityModManager.dll','UnityModManager/0Harmon
 $arguments+=('/reference:'+(Join-Path $GameDirectory 'Mods/dv-scaling/DVLSFG.dll').Replace('/','\'))
 $arguments+=(Join-Path $PSScriptRoot ($source+'.cs'))
 if($Kind -eq 'SceneUi') {$arguments+=(Join-Path $PSScriptRoot 'Fsr3WorldSmoke.cs')}
-if($Kind -eq 'FsrFgWorld') {$arguments+=(Join-Path $PSScriptRoot 'ZoomWorldProbe.cs'); $arguments+=(Join-Path $PSScriptRoot 'ThroughputWorldProbe.cs'); $arguments+=(Join-Path $PSScriptRoot 'UiCaptureCacheSmoke.cs')}
+if($Kind -eq 'FsrFgWorld') {$arguments+=(Join-Path $PSScriptRoot 'ZoomWorldProbe.cs'); $arguments+=(Join-Path $PSScriptRoot 'ThroughputWorldProbe.cs'); $arguments+=(Join-Path $PSScriptRoot 'UiCaptureCacheSmoke.cs'); $arguments+=(Join-Path $PSScriptRoot 'PauseWorldProbe.cs')}
 & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' @arguments
 if($LASTEXITCODE) {throw 'Fixture compilation failed'}
 Write-Output $fixture

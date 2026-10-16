@@ -220,6 +220,26 @@ namespace DVLSFG {
         }
     }
     [HarmonyPatch]
+    static class PreserveFsrScreenshotTarget {
+        internal struct State {internal Camera Camera; internal RenderTexture Target;}
+        static MethodBase TargetMethod() {return AccessTools.Method(AccessTools.TypeByName("ScreenshotTaker"),"TakeScreenshotWithoutUI");}
+        static void Prefix(out State __state) {
+            __state=default(State);
+            // Native snapshots temporarily render the active scene camera into
+            // their own texture, then assign null rather than the previous target.
+            // Preserve our ownership so a menu snapshot cannot destroy SR history.
+            var player=AccessTools.TypeByName("PlayerManager");
+            var camera=AccessTools.Property(player,"ActiveCamera").GetValue(null,null) as Camera;
+            if(!camera || !camera.targetTexture) return;
+            var fsr=camera.GetComponent<FsrSceneCamera>();
+            var fsr3=camera.GetComponent<Fsr3SceneCamera>();
+            if((fsr && fsr.OwnsSceneTarget) || (fsr3 && fsr3.OwnsSceneTarget)) __state=new State {Camera=camera,Target=camera.targetTexture};
+        }
+        static void Restore(State state) {if(state.Camera && state.Target) state.Camera.targetTexture=state.Target;}
+        static void Postfix(State __state) {Restore(__state);}
+        static Exception Finalizer(Exception __exception,State __state) {if(__exception!=null) Restore(__state); return __exception;}
+    }
+    [HarmonyPatch]
     static class RegisterFsrSceneCamera {
         static MethodBase TargetMethod() {return AccessTools.Method(AccessTools.TypeByName("DV.VFX.CameraGraphicsUpdater"),"Awake");}
         static void Postfix(Component __instance) {FsrRuntime.RegisterGraphics(__instance);}
